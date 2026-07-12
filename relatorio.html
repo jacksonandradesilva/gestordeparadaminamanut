@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Relatorio de Parada Manutencao Mina</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="page-shell">
+    <div class="page-header">
+      <h1>Relatorio de Parada Manutencao Mina</h1>
+      <img class="page-header-logo" src="img/logo-header (1).png" alt="Logo Stratos" />
+    </div>
+    <div class="page-actions">
+      <a href="index.html" class="btn-link">Voltar ao painel</a>
+    </div>
+
+    <form id="observacaoTurnoForm">
+      <div class="form-field">
+        <label for="turnoObservacao">Turno</label>
+        <select id="turnoObservacao" required>
+          <option value="A">A</option>
+          <option value="B">B</option>
+          <option value="C">C</option>
+          <option value="D">D</option>
+        </select>
+      </div>
+      <div class="form-field">
+        <label for="turmaObservacao">Turma</label>
+        <select id="turmaObservacao" required>
+          <option value="A">A</option>
+          <option value="B">B</option>
+          <option value="C">C</option>
+          <option value="D">D</option>
+        </select>
+      </div>
+      <div class="form-field form-field-wide">
+        <label for="nomeLiderTecnico">Nome do Lider Tecnico</label>
+        <input type="text" id="nomeLiderTecnico" placeholder="Digite o nome do lider tecnico" />
+      </div>
+      <div class="form-field form-field-wide">
+        <label for="nomeSupervisor">Nome do Supervisor</label>
+        <input type="text" id="nomeSupervisor" placeholder="Digite o nome do supervisor" />
+      </div>
+      <div class="form-field form-field-wide">
+        <label for="equipeManutencaoObservacao">Equipe de Manutencao</label>
+        <input type="text" id="equipeManutencaoObservacao" placeholder="Digite a equipe de manutencao" />
+      </div>
+      <div class="form-field form-field-wide">
+        <label for="textoObservacaoTurno">Observacao do turno</label>
+        <textarea id="textoObservacaoTurno" rows="3" placeholder="Escreva aqui a observacao do turno..."></textarea>
+      </div>
+      <div class="form-actions">
+        <button type="submit">Salvar observacao</button>
+      </div>
+    </form>
+
+    <section class="summary-cards">
+      <article class="card">
+        <span>Tempo total de parada (Gestao de Parada da Manutencao)</span>
+        <strong id="tempoTotalParadaGestao">00:00</strong>
+      </article>
+    </section>
+
+    <table id="relatorioTabela">
+      <thead>
+        <tr>
+          <th>Painel</th>
+          <th>Status</th>
+          <th>Turno</th>
+          <th>Turma</th>
+          <th>Equipe de Manutencao</th>
+          <th>Inicio</th>
+          <th>Fim</th>
+          <th>Cadastro</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <div id="relatorioVazio" class="empty-state" hidden>Nenhuma parada registrada.</div>
+  </main>
+
+  <script src="app-api.js"></script>
+  <script>
+    const OBSERVACOES_STORAGE_KEY = 'mina_relatorio_observacoes_turno_v1';
+    const observacaoTurnoForm = document.getElementById('observacaoTurnoForm');
+    const turnoObservacao = document.getElementById('turnoObservacao');
+    const turmaObservacao = document.getElementById('turmaObservacao');
+    const nomeLiderTecnico = document.getElementById('nomeLiderTecnico');
+    const nomeSupervisor = document.getElementById('nomeSupervisor');
+    const equipeManutencaoObservacao = document.getElementById('equipeManutencaoObservacao');
+    const textoObservacaoTurno = document.getElementById('textoObservacaoTurno');
+    const tempoTotalParadaGestao = document.getElementById('tempoTotalParadaGestao');
+    const relatorioTabela = document.querySelector('#relatorioTabela tbody');
+    const relatorioVazio = document.getElementById('relatorioVazio');
+
+    function parseTimeToMinutes(timeValue) {
+      if (!timeValue || !timeValue.includes(':')) {
+        return null;
+      }
+
+      const [hoursText, minutesText] = timeValue.split(':');
+      const hours = Number(hoursText);
+      const minutes = Number(minutesText);
+
+      if (Number.isNaN(hours) || Number.isNaN(minutes)) {
+        return null;
+      }
+
+      return (hours * 60) + minutes;
+    }
+
+    function getDurationInMinutes(item) {
+      const startMinutes = parseTimeToMinutes(item.horaInicio);
+      const endMinutes = parseTimeToMinutes(item.horaFim);
+
+      if (startMinutes === null || endMinutes === null) {
+        return 0;
+      }
+
+      if (endMinutes >= startMinutes) {
+        return endMinutes - startMinutes;
+      }
+
+      return (24 * 60) - startMinutes + endMinutes;
+    }
+
+    function formatMinutes(totalMinutes) {
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      return String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
+    }
+
+    function renderTempoTotalParada(historicoParadas) {
+      const totalMinutos = historicoParadas.reduce((total, item) => total + getDurationInMinutes(item), 0);
+      tempoTotalParadaGestao.textContent = formatMinutes(totalMinutos);
+    }
+
+    function getObservacoesTurno() {
+      try {
+        const raw = window.localStorage.getItem(OBSERVACOES_STORAGE_KEY);
+        const parsed = raw ? JSON.parse(raw) : {};
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch (error) {
+        return {};
+      }
+    }
+
+    function saveObservacoesTurno(observacoes) {
+      window.localStorage.setItem(OBSERVACOES_STORAGE_KEY, JSON.stringify(observacoes));
+    }
+
+    function getObservacaoKey(turno, turma) {
+      return String(turno || '') + '_' + String(turma || '');
+    }
+
+    function getRegistroObservacao(observacoes, key) {
+      const registro = observacoes[key];
+
+      if (!registro) {
+        return {
+          texto: '',
+          liderTecnico: '',
+          supervisor: '',
+          equipeManutencao: ''
+        };
+      }
+
+      if (typeof registro === 'string') {
+        return {
+          texto: registro,
+          liderTecnico: '',
+          supervisor: '',
+          equipeManutencao: ''
+        };
+      }
+
+      return {
+        texto: registro.texto || '',
+        liderTecnico: registro.liderTecnico || '',
+        supervisor: registro.supervisor || '',
+        equipeManutencao: registro.equipeManutencao || ''
+      };
+    }
+
+    function carregarObservacaoDoTurno() {
+      const observacoes = getObservacoesTurno();
+      const key = getObservacaoKey(turnoObservacao.value, turmaObservacao.value);
+      const registro = getRegistroObservacao(observacoes, key);
+      textoObservacaoTurno.value = registro.texto;
+      nomeLiderTecnico.value = registro.liderTecnico;
+      nomeSupervisor.value = registro.supervisor;
+      equipeManutencaoObservacao.value = registro.equipeManutencao;
+    }
+
+    function fillCell(row, label, value) {
+      const cell = document.createElement('td');
+      cell.setAttribute('data-label', label);
+      cell.textContent = value || '-';
+      row.appendChild(cell);
+    }
+
+    function renderRelatorio(registros) {
+      relatorioTabela.innerHTML = '';
+
+      if (registros.length === 0) {
+        relatorioVazio.hidden = false;
+        return;
+      }
+
+      relatorioVazio.hidden = true;
+
+      registros.forEach((item) => {
+        const row = document.createElement('tr');
+        fillCell(row, 'Painel', item.nome);
+        fillCell(row, 'Status', item.status);
+        fillCell(row, 'Turno', item.turno);
+        fillCell(row, 'Turma', item.turma);
+        fillCell(row, 'Equipe de Manutencao', item.causa);
+        fillCell(row, 'Inicio', item.horaInicio);
+        fillCell(row, 'Fim', item.horaFim);
+        fillCell(row, 'Cadastro', item.dataHoraCadastro || item.dataHoraRegistro);
+        relatorioTabela.appendChild(row);
+      });
+    }
+
+    async function carregarRelatorio() {
+      const state = await window.serverStore.getState();
+      const historicoParadas = Array.isArray(state.historicoParadas) ? state.historicoParadas : [];
+      renderTempoTotalParada(historicoParadas);
+      renderRelatorio(historicoParadas);
+    }
+
+    turnoObservacao.addEventListener('change', carregarObservacaoDoTurno);
+    turmaObservacao.addEventListener('change', carregarObservacaoDoTurno);
+
+    observacaoTurnoForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+
+      const observacoes = getObservacoesTurno();
+      const key = getObservacaoKey(turnoObservacao.value, turmaObservacao.value);
+      observacoes[key] = {
+        texto: textoObservacaoTurno.value.trim(),
+        liderTecnico: nomeLiderTecnico.value.trim(),
+        supervisor: nomeSupervisor.value.trim(),
+        equipeManutencao: equipeManutencaoObservacao.value.trim()
+      };
+      saveObservacoesTurno(observacoes);
+      alert('Observacao do turno/turma salva com sucesso.');
+    });
+
+    carregarRelatorio();
+    carregarObservacaoDoTurno();
+  </script>
+</body>
+</html>

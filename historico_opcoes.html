@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Historico por Opcao</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="page-shell">
+    <div class="page-header">
+      <h1>Historico por Opcao</h1>
+      <img class="page-header-logo" src="img/logo-header (1).png" alt="Logo Stratos" />
+    </div>
+    <div class="page-actions">
+      <a href="index.html" class="btn-link">Voltar ao painel</a>
+    </div>
+
+    <section class="filter-bar">
+      <input type="text" id="filtroNome" placeholder="Filtrar por painel" />
+      <select id="filtroStatus">
+        <option value="">Todos os status</option>
+        <option value="parado">Parado</option>
+        <option value="liberado">Liberado</option>
+        <option value="standby">Standby</option>
+      </select>
+      <select id="filtroTurno">
+        <option value="">Todos os turnos</option>
+        <option value="A">A</option>
+        <option value="B">B</option>
+        <option value="C">C</option>
+        <option value="D">D</option>
+      </select>
+      <select id="filtroTurma">
+        <option value="">Todas as turmas</option>
+        <option value="A">A</option>
+        <option value="B">B</option>
+        <option value="C">C</option>
+        <option value="D">D</option>
+      </select>
+    </section>
+
+    <section class="summary-cards" id="resumoFiltros">
+      <article class="card">
+        <span>Horario total das paradas</span>
+        <strong id="totalHorarioFiltrado">00:00</strong>
+      </article>
+      <article class="card">
+        <span>Total do painel pesquisado</span>
+        <strong id="totalHorarioPainel">00:00</strong>
+      </article>
+    </section>
+
+    <table id="filtroTabela">
+      <thead>
+        <tr>
+          <th>Painel</th>
+          <th>Status</th>
+          <th>Turno</th>
+          <th>Turma</th>
+          <th>Equipe Mecanica</th>
+          <th>Inicio</th>
+          <th>Fim</th>
+          <th>Registro</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <div id="filtroVazio" class="empty-state" hidden>Nenhum item encontrado para o filtro atual.</div>
+  </main>
+
+  <script src="app-api.js"></script>
+  <script>
+    const filtroNome = document.getElementById('filtroNome');
+    const filtroStatus = document.getElementById('filtroStatus');
+    const filtroTurno = document.getElementById('filtroTurno');
+    const filtroTurma = document.getElementById('filtroTurma');
+    const filtroTabela = document.querySelector('#filtroTabela tbody');
+    const filtroVazio = document.getElementById('filtroVazio');
+    const totalHorarioFiltrado = document.getElementById('totalHorarioFiltrado');
+    const totalHorarioPainel = document.getElementById('totalHorarioPainel');
+
+    let historicoCompleto = [];
+
+    function parseTimeToMinutes(timeValue) {
+      if (!timeValue || !timeValue.includes(':')) {
+        return null;
+      }
+
+      const [hoursText, minutesText] = timeValue.split(':');
+      const hours = Number(hoursText);
+      const minutes = Number(minutesText);
+
+      if (Number.isNaN(hours) || Number.isNaN(minutes)) {
+        return null;
+      }
+
+      return (hours * 60) + minutes;
+    }
+
+    function getDurationInMinutes(item) {
+      const startMinutes = parseTimeToMinutes(item.horaInicio);
+      const endMinutes = parseTimeToMinutes(item.horaFim);
+
+      if (startMinutes === null || endMinutes === null) {
+        return 0;
+      }
+
+      if (endMinutes >= startMinutes) {
+        return endMinutes - startMinutes;
+      }
+
+      return (24 * 60) - startMinutes + endMinutes;
+    }
+
+    function formatMinutes(totalMinutes) {
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      return String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
+    }
+
+    function updateResumo(itemsFiltrados, nomeFiltro) {
+      const totalGeralMin = historicoCompleto.reduce((total, item) => total + getDurationInMinutes(item), 0);
+      totalHorarioFiltrado.textContent = formatMinutes(totalGeralMin);
+
+      if (!nomeFiltro) {
+        totalHorarioPainel.textContent = '00:00';
+        return;
+      }
+
+      const itensDoPainel = historicoCompleto.filter((item) => {
+        return (item.nome || '').toLowerCase().includes(nomeFiltro);
+      });
+
+      const totalPainelMin = itensDoPainel.reduce((total, item) => total + getDurationInMinutes(item), 0);
+      totalHorarioPainel.textContent = formatMinutes(totalPainelMin);
+    }
+
+    function fillCell(row, label, value) {
+      const cell = document.createElement('td');
+      cell.setAttribute('data-label', label);
+      cell.textContent = value || '-';
+      row.appendChild(cell);
+    }
+
+    function renderTabela(items) {
+      filtroTabela.innerHTML = '';
+
+      if (items.length === 0) {
+        filtroVazio.hidden = false;
+        return;
+      }
+
+      filtroVazio.hidden = true;
+
+      items.forEach((item) => {
+        const row = document.createElement('tr');
+        fillCell(row, 'Painel', item.nome);
+        fillCell(row, 'Status', item.status);
+        fillCell(row, 'Turno', item.turno);
+        fillCell(row, 'Turma', item.turma);
+        fillCell(row, 'Equipe Mecanica', item.causa);
+        fillCell(row, 'Inicio', item.horaInicio);
+        fillCell(row, 'Fim', item.horaFim);
+        fillCell(row, 'Registro', item.dataHoraRegistro);
+        filtroTabela.appendChild(row);
+      });
+    }
+
+    function aplicarFiltros() {
+      const nome = filtroNome.value.trim().toLowerCase();
+      const status = filtroStatus.value;
+      const turno = filtroTurno.value;
+      const turma = filtroTurma.value;
+
+      const filtrados = historicoCompleto.filter((item) => {
+        const matchNome = !nome || (item.nome || '').toLowerCase().includes(nome);
+        const matchStatus = !status || item.status === status;
+        const matchTurno = !turno || item.turno === turno;
+        const matchTurma = !turma || item.turma === turma;
+        return matchNome && matchStatus && matchTurno && matchTurma;
+      });
+
+      renderTabela(filtrados);
+      updateResumo(filtrados, nome);
+    }
+
+    async function carregarHistorico() {
+      const state = await window.serverStore.getState();
+      historicoCompleto = Array.isArray(state.historicoParadas) ? state.historicoParadas : [];
+      aplicarFiltros();
+    }
+
+    filtroNome.addEventListener('input', aplicarFiltros);
+    filtroStatus.addEventListener('change', aplicarFiltros);
+    filtroTurno.addEventListener('change', aplicarFiltros);
+    filtroTurma.addEventListener('change', aplicarFiltros);
+
+    carregarHistorico();
+  </script>
+</body>
+</html>
