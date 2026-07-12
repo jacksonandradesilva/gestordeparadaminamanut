@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gestao de Parada da Manutencao</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="page-shell">
+    <div class="page-header">
+      <h1>Gestao de Parada da Manutencao</h1>
+      <img class="page-header-logo" src="img/logo-header (1).png" alt="Logo Stratos" />
+    </div>
+    <div class="page-actions">
+      <a href="index.html" class="btn-link">Voltar ao painel</a>
+      <button type="button" class="btn perigo" id="limparHistorico">Limpar historico</button>
+    </div>
+
+    <form id="editarHistoricoForm" hidden>
+      <div>
+        <label for="editarNome">Painel</label>
+        <input type="text" id="editarNome" required />
+      </div>
+      <div>
+        <label for="editarStatus">Status</label>
+        <select id="editarStatus" required>
+          <option value="parado">Parado</option>
+          <option value="liberado">Liberado</option>
+          <option value="standby">Standby</option>
+        </select>
+      </div>
+      <div>
+        <label for="editarTurno">Turno</label>
+        <select id="editarTurno" required>
+          <option value="A">A</option>
+          <option value="B">B</option>
+          <option value="C">C</option>
+          <option value="D">D</option>
+        </select>
+      </div>
+      <div>
+        <label for="editarTurma">Turma</label>
+        <select id="editarTurma" required>
+          <option value="A">A</option>
+          <option value="B">B</option>
+          <option value="C">C</option>
+          <option value="D">D</option>
+        </select>
+      </div>
+      <div>
+        <label for="editarCausa">Equipe de Manutencao</label>
+        <input type="text" id="editarCausa" />
+      </div>
+      <div>
+        <label for="editarHoraInicio">Inicio</label>
+        <input type="time" id="editarHoraInicio" />
+      </div>
+      <div>
+        <label for="editarHoraFim">Fim</label>
+        <input type="time" id="editarHoraFim" />
+      </div>
+      <div>
+        <label for="editarAcao">Tipo de Manutencao</label>
+        <select id="editarAcao" required>
+          <option value="corretiva">Corretiva</option>
+          <option value="preventiva">Preventiva</option>
+          <option value="preditiva">Preditiva</option>
+          <option value="programada">Programada</option>
+        </select>
+      </div>
+      <button type="submit">Salvar edicao</button>
+      <button type="button" class="btn secundario" id="cancelarEdicaoHistorico">Cancelar</button>
+    </form>
+
+    <section class="summary-cards" id="resumoHistorico">
+      <article class="card observacoes-card">
+        <span>Observacoes</span>
+        <textarea id="observacoesHistorico" rows="4" placeholder="Digite observacoes da gestao de parada da manutencao..."></textarea>
+        <button type="button" id="salvarObservacoesHistorico">Salvar observacoes</button>
+      </article>
+      <article class="card">
+        <span>Tempo total de parada</span>
+        <strong id="totalHorasParadas">00:00</strong>
+      </article>
+    </section>
+
+    <table id="historicoTabela">
+      <thead>
+        <tr>
+          <th>Painel</th>
+          <th>Status</th>
+          <th>Turno</th>
+          <th>Turma</th>
+          <th>Equipe de Manutencao</th>
+          <th>Inicio</th>
+          <th>Fim</th>
+          <th>Tipo de Manutencao</th>
+          <th>Registro</th>
+          <th>Acoes</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <div id="historicoVazio" class="empty-state" hidden>Nenhuma parada registrada.</div>
+  </main>
+
+  <script src="app-api.js"></script>
+  <script>
+    const HISTORICO_OBSERVACOES_KEY = 'mina_historico_observacoes_v1';
+    const historicoTabela = document.querySelector('#historicoTabela tbody');
+    const historicoVazio = document.getElementById('historicoVazio');
+    const limparHistorico = document.getElementById('limparHistorico');
+    const observacoesHistorico = document.getElementById('observacoesHistorico');
+    const salvarObservacoesHistorico = document.getElementById('salvarObservacoesHistorico');
+    const totalHorasParadas = document.getElementById('totalHorasParadas');
+    const editarHistoricoForm = document.getElementById('editarHistoricoForm');
+    const editarNome = document.getElementById('editarNome');
+    const editarStatus = document.getElementById('editarStatus');
+    const editarTurno = document.getElementById('editarTurno');
+    const editarTurma = document.getElementById('editarTurma');
+    const editarCausa = document.getElementById('editarCausa');
+    const editarHoraInicio = document.getElementById('editarHoraInicio');
+    const editarHoraFim = document.getElementById('editarHoraFim');
+    const editarAcao = document.getElementById('editarAcao');
+    const cancelarEdicaoHistorico = document.getElementById('cancelarEdicaoHistorico');
+    let historicoParadas = [];
+    let historicoEditandoId = null;
+
+    function parseTimeToMinutes(timeValue) {
+      if (!timeValue || !timeValue.includes(':')) {
+        return null;
+      }
+
+      const [hoursText, minutesText] = timeValue.split(':');
+      const hours = Number(hoursText);
+      const minutes = Number(minutesText);
+
+      if (Number.isNaN(hours) || Number.isNaN(minutes)) {
+        return null;
+      }
+
+      return (hours * 60) + minutes;
+    }
+
+    function getDurationInMinutes(item) {
+      const startMinutes = parseTimeToMinutes(item.horaInicio);
+      const endMinutes = parseTimeToMinutes(item.horaFim);
+
+      if (startMinutes === null || endMinutes === null) {
+        return 0;
+      }
+
+      if (endMinutes >= startMinutes) {
+        return endMinutes - startMinutes;
+      }
+
+      return (24 * 60) - startMinutes + endMinutes;
+    }
+
+    function formatMinutes(totalMinutes) {
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      return String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
+    }
+
+    function renderResumo(items) {
+      const accumulatedMinutes = items.reduce((total, item) => total + getDurationInMinutes(item), 0);
+      totalHorasParadas.textContent = formatMinutes(accumulatedMinutes);
+    }
+
+    function carregarObservacoesHistorico() {
+      try {
+        observacoesHistorico.value = window.localStorage.getItem(HISTORICO_OBSERVACOES_KEY) || '';
+      } catch (erro) {
+        observacoesHistorico.value = '';
+      }
+    }
+
+    function salvarObservacoes() {
+      try {
+        window.localStorage.setItem(HISTORICO_OBSERVACOES_KEY, observacoesHistorico.value);
+        alert('Observacoes salvas com sucesso.');
+      } catch (erro) {
+        alert('Nao foi possivel salvar as observacoes.');
+      }
+    }
+
+    function fillCell(row, label, value) {
+      const cell = document.createElement('td');
+      cell.setAttribute('data-label', label);
+      cell.textContent = value || '-';
+      row.appendChild(cell);
+    }
+
+    function fillStatusCell(row, status) {
+      const cell = document.createElement('td');
+      cell.setAttribute('data-label', 'Status');
+      cell.textContent = status ? status.charAt(0).toUpperCase() + status.slice(1) : '-';
+
+      if (status) {
+        cell.classList.add(`status-${status}`);
+      }
+
+      if (status === 'parado') {
+        cell.classList.add('status-highlight');
+      }
+
+      row.appendChild(cell);
+    }
+
+    function limparFormularioEdicao() {
+      editarHistoricoForm.reset();
+      editarHistoricoForm.hidden = true;
+      historicoEditandoId = null;
+    }
+
+    function abrirEdicao(item) {
+      historicoEditandoId = item.idHistorico;
+      editarNome.value = item.nome || '';
+      editarStatus.value = item.status || 'parado';
+      editarTurno.value = item.turno || 'A';
+      editarTurma.value = item.turma || 'A';
+      editarCausa.value = item.causa || '';
+      editarHoraInicio.value = item.horaInicio || '';
+      editarHoraFim.value = item.horaFim || '';
+      editarAcao.value = ['corretiva', 'preventiva', 'preditiva', 'programada'].includes(item.acao)
+        ? item.acao
+        : 'corretiva';
+      editarHistoricoForm.hidden = false;
+      editarNome.focus();
+    }
+
+    function createActionCell(itemId) {
+      const cell = document.createElement('td');
+      cell.setAttribute('data-label', 'Acoes');
+
+      const editButton = document.createElement('button');
+      editButton.type = 'button';
+      editButton.className = 'btn editar';
+      editButton.textContent = 'Editar';
+      editButton.addEventListener('click', () => {
+        const item = historicoParadas.find((historicoItem) => historicoItem.idHistorico === itemId);
+        if (!item) {
+          return;
+        }
+
+        abrirEdicao(item);
+      });
+
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'btn excluir';
+      button.textContent = 'Excluir';
+      button.addEventListener('click', async () => {
+        historicoParadas = historicoParadas.filter((item) => item.idHistorico !== itemId);
+        await window.serverStore.saveHistoricoParadas(historicoParadas);
+        renderHistorico(historicoParadas);
+      });
+
+      cell.appendChild(editButton);
+      cell.appendChild(button);
+      cell.style.display = 'flex';
+      cell.style.gap = '8px';
+      return cell;
+    }
+
+    function renderHistorico(items) {
+      historicoTabela.innerHTML = '';
+      renderResumo(items);
+
+      if (items.length === 0) {
+        historicoVazio.hidden = false;
+        return;
+      }
+
+      historicoVazio.hidden = true;
+
+      items.forEach((item) => {
+        const row = document.createElement('tr');
+        fillCell(row, 'Painel', item.nome);
+        fillStatusCell(row, item.status);
+        fillCell(row, 'Turno', item.turno);
+        fillCell(row, 'Turma', item.turma);
+        fillCell(row, 'Equipe de Manutencao', item.causa);
+        fillCell(row, 'Inicio', item.horaInicio);
+        fillCell(row, 'Fim', item.horaFim);
+        fillCell(row, 'Tipo de Manutencao', item.acao ? item.acao.charAt(0).toUpperCase() + item.acao.slice(1) : '-');
+        fillCell(row, 'Registro', item.dataHoraRegistro);
+        row.appendChild(createActionCell(item.idHistorico));
+        historicoTabela.appendChild(row);
+      });
+    }
+
+    async function carregarHistorico() {
+      const state = await window.serverStore.getState();
+      historicoParadas = Array.isArray(state.historicoParadas) ? state.historicoParadas : [];
+      renderHistorico(historicoParadas);
+    }
+
+    limparHistorico.addEventListener('click', async () => {
+      historicoParadas = [];
+      await window.serverStore.saveHistoricoParadas([]);
+      limparFormularioEdicao();
+      renderHistorico([]);
+    });
+
+    cancelarEdicaoHistorico.addEventListener('click', () => {
+      limparFormularioEdicao();
+    });
+
+    salvarObservacoesHistorico.addEventListener('click', salvarObservacoes);
+
+    editarHistoricoForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      if (historicoEditandoId === null) {
+        return;
+      }
+
+      historicoParadas = historicoParadas.map((item) => {
+        if (item.idHistorico !== historicoEditandoId) {
+          return item;
+        }
+
+        return {
+          ...item,
+          nome: editarNome.value.trim(),
+          status: editarStatus.value,
+          turno: editarTurno.value,
+          turma: editarTurma.value,
+          causa: editarCausa.value.trim(),
+          horaInicio: editarHoraInicio.value,
+          horaFim: editarHoraFim.value,
+          acao: editarAcao.value.trim()
+        };
+      });
+
+      await window.serverStore.saveHistoricoParadas(historicoParadas);
+      limparFormularioEdicao();
+      renderHistorico(historicoParadas);
+    });
+
+    carregarHistorico();
+    carregarObservacoesHistorico();
+  </script>
+</body>
+</html>
