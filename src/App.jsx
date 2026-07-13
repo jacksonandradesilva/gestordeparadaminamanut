@@ -173,6 +173,14 @@ function DashboardPage() {
     await persist(nextEquipamentos, historicoParadas);
   }
 
+  async function limparStatusParado() {
+    if (confirm('Tem certeza que deseja remover todos os itens com status "Parado"?')) {
+      const nextEquipamentos = equipamentos.filter((equip) => equip.status !== 'parado');
+      setEquipamentos(nextEquipamentos);
+      await persist(nextEquipamentos, historicoParadas);
+    }
+  }
+
   return (
     <main className="page-shell">
       <Header title="Status - Mina Manutencao" />
@@ -182,6 +190,9 @@ function DashboardPage() {
         <LinkButton to="/relatorio-turnos">Relatorio por Turno</LinkButton>
         <LinkButton to="/historico-opcoes">Historico por Opcao</LinkButton>
         <LinkButton to="/dashboard-turnos">Dashboard por Turno</LinkButton>
+        {equipamentos.some((e) => e.status === 'parado') && (
+          <button type="button" className="btn excluir" onClick={limparStatusParado}>Limpar Status Parado</button>
+        )}
       </div>
 
       <form onSubmit={handleSubmit}>
@@ -275,7 +286,7 @@ function DashboardPage() {
 
         <div className="form-actions">
           <button type="submit">{editandoIndex !== null ? 'Salvar edicao' : 'Cadastrar'}</button>
-          <button type="button" onClick={resetForm}>Limpar</button>
+          <button type="button" className="btn excluir" onClick={resetForm}>Limpar</button>
         </div>
       </form>
 
