@@ -105,7 +105,23 @@ export async function getState() {
 }
 
 export async function saveState(state) {
-  const safeState = writeLocalState(state || {});
+  const incomingState = state && typeof state === 'object' ? state : {};
+  const currentState = readLocalState();
+
+  // Mescla com o estado atual para evitar perda de campos em atualizacoes parciais.
+  const mergedState = {
+    equipamentos: Object.prototype.hasOwnProperty.call(incomingState, 'equipamentos')
+      ? incomingState.equipamentos
+      : currentState.equipamentos,
+    historicoParadas: Object.prototype.hasOwnProperty.call(incomingState, 'historicoParadas')
+      ? incomingState.historicoParadas
+      : currentState.historicoParadas,
+    relatorioTurnosNotas: Object.prototype.hasOwnProperty.call(incomingState, 'relatorioTurnosNotas')
+      ? incomingState.relatorioTurnosNotas
+      : currentState.relatorioTurnosNotas
+  };
+
+  const safeState = writeLocalState(mergedState);
 
   if (!supabase) {
     return safeState;
