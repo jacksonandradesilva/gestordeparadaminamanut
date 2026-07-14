@@ -18,10 +18,53 @@ function normalizeSupabaseUrl(url) {
 const SUPABASE_URL = normalizeSupabaseUrl(import.meta.env.VITE_SUPABASE_URL);
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const hasRemoteConfig = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+const storageMode = hasRemoteConfig ? 'supabase' : 'local';
+
+let hasLoggedModeNotice = false;
+
+function logStorageModeNotice() {
+  if (hasLoggedModeNotice) {
+    return;
+  }
+
+  hasLoggedModeNotice = true;
+
+  if (hasRemoteConfig) {
+    return;
+  }
+
+  const missing = [];
+
+  if (!SUPABASE_URL) {
+    missing.push('VITE_SUPABASE_URL');
+  }
+
+  if (!SUPABASE_ANON_KEY) {
+    missing.push('VITE_SUPABASE_ANON_KEY');
+  }
+
+  console.warn(
+    `Supabase desativado. O app esta usando apenas localStorage. Defina as variaveis ${missing.join(', ')} no ambiente de deploy (ex.: Vercel).`
+  );
+}
 
 const supabase = hasRemoteConfig
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
   : null;
+
+logStorageModeNotice();
+
+export function getStorageStatus() {
+  return {
+    mode: storageMode,
+    hasRemoteConfig,
+    supabaseUrl: SUPABASE_URL,
+    missingEnvVars: [
+      ...(SUPABASE_URL ? [] : ['VITE_SUPABASE_URL']),
+      ...(SUPABASE_ANON_KEY ? [] : ['VITE_SUPABASE_ANON_KEY'])
+    ]
+  };
+}
 
 function getEmptyState() {
   return {
