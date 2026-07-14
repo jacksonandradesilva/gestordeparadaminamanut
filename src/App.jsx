@@ -453,7 +453,6 @@ function HistoricoPage() {
 
       <div className="page-actions">
         <LinkButton to="/">Voltar ao painel</LinkButton>
-        <button type="button" className="btn perigo" onClick={limparHistorico}>Limpar historico</button>
       </div>
 
       {editId !== null && (
@@ -622,32 +621,38 @@ function HistoricoOpcoesPage() {
     };
   }, []);
 
-  const filtrados = useMemo(() => {
-    const nome = filtroNome.trim().toLowerCase();
+  const nomeFiltro = filtroNome.trim().toLowerCase();
 
+  const filtradosBase = useMemo(() => {
     return historicoCompleto.filter((item) => {
-      const matchNome = !nome || (item.nome || '').toLowerCase().includes(nome);
       const matchStatus = !filtroStatus || item.status === filtroStatus;
       const matchTurno = !filtroTurno || item.turno === filtroTurno;
       const matchTurma = !filtroTurma || item.turma === filtroTurma;
-      return matchNome && matchStatus && matchTurno && matchTurma;
+      return matchStatus && matchTurno && matchTurma;
     });
-  }, [filtroNome, filtroStatus, filtroTurno, filtroTurma, historicoCompleto]);
+  }, [filtroStatus, filtroTurno, filtroTurma, historicoCompleto]);
+
+  const filtrados = useMemo(() => {
+    if (!nomeFiltro) {
+      return filtradosBase;
+    }
+
+    return filtradosBase.filter((item) => (item.nome || '').toLowerCase().includes(nomeFiltro));
+  }, [nomeFiltro, filtradosBase]);
 
   const totalHorarioFiltrado = useMemo(() => {
-    const totalMin = filtrados.reduce((total, item) => total + getDurationInMinutes(item), 0);
+    const totalMin = filtradosBase.reduce((total, item) => total + getDurationInMinutes(item), 0);
     return formatMinutes(totalMin);
-  }, [filtrados]);
+  }, [filtradosBase]);
 
   const totalHorarioPainel = useMemo(() => {
-    const nome = filtroNome.trim().toLowerCase();
-    if (!nome) {
+    if (!nomeFiltro) {
       return '00:00';
     }
 
     const totalMin = filtrados.reduce((total, item) => total + getDurationInMinutes(item), 0);
     return formatMinutes(totalMin);
-  }, [filtroNome, filtrados]);
+  }, [nomeFiltro, filtrados]);
 
   return (
     <main className="page-shell">
