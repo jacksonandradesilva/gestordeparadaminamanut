@@ -1,4 +1,4 @@
-eu jovem # Banco de Dados para Vercel (Supabase)
+# Banco de Dados para Vercel (Supabase)
 
 ## 1. Criar projeto no Supabase
 1. Acesse https://supabase.com e crie um projeto.
@@ -13,8 +13,8 @@ alter table public.app_state
    add column if not exists relatorio_turnos_notas jsonb not null default '{}'::jsonb;
 ```
 
-## 2. Configurar variaveis no projeto React
-1. Copie `.env.example` para `.env` no ambiente local.
+## 2. Configurar variaveis no projeto React (local)
+1. Copie `.env.example` para `.env.local` no ambiente local.
 2. Preencha:
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
@@ -29,7 +29,15 @@ No projeto da Vercel, adicione as mesmas variaveis de ambiente:
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
 
-Depois faca novo deploy.
+Escopos recomendados: `Production`, `Preview` e `Development`.
+
+Depois faca novo deploy (ou use Redeploy) para as variaveis entrarem no build.
+
+### Checklist rapido de erro comum
+- Confirme se `VITE_SUPABASE_URL` esta no formato `https://<project-ref>.supabase.co`.
+- Nao use a URL do endpoint REST (`.../rest/v1`) nas variaveis.
+- Use a chave `anon` (publica), nao a `service_role`.
+- Abra o console do navegador no site da Vercel e confira se existe aviso de fallback para localStorage.
 
 ## Importante
 - O deploy publicado no Vercel usa o app React em `src/` com o `index.html` da raiz como entrada.
