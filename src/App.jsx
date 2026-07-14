@@ -6,6 +6,117 @@ import { formatDateTime, formatMinutes, getDurationInMinutes } from './utils';
 const HISTORICO_OBSERVACOES_KEY = 'mina_historico_observacoes_v1';
 const TURNOS = ['A', 'B', 'C', 'D'];
 
+function normalizeText(text) {
+  return String(text || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+function toParadaBase(historicoParadas) {
+  const list = Array.isArray(historicoParadas) ? historicoParadas : [];
+  const onlyParado = list.filter((item) => normalizeText(item?.status) === 'parado');
+  return onlyParado.length > 0 ? onlyParado : list;
+}
+
+function groupParadasBy(list, fieldName) {
+  const grouped = new Map();
+
+  list.forEach((item) => {
+    const key = String(item?.[fieldName] || 'Nao informado').trim() || 'Nao informado';
+    const prev = grouped.get(key) || { label: key, quantidade: 0, minutos: 0 };
+
+    grouped.set(key, {
+      label: key,
+      quantidade: prev.quantidade + 1,
+      minutos: prev.minutos + getDurationInMinutes(item)
+    });
+  });
+
+  return [...grouped.values()].sort((a, b) => {
+    if (b.quantidade !== a.quantidade) {
+      return b.quantidade - a.quantidade;
+    }
+
+    return b.minutos - a.minutos;
+  });
+}
+
+function buildAgentReply(question, historicoParadas) {
+  const pergunta = normalizeText(question);
+  const baseParadas = toParadaBase(historicoParadas);
+
+  if (!pergunta) {
+    return {
+      title: 'Escreva uma pergunta',
+      content: 'Exemplo: qual painel teve mais parada?'
+    };
+  }
+
+  if (baseParadas.length === 0) {
+    return {
+      title: 'Sem dados para analisar',
+      content: 'Ainda nao existem registros de parada no historico.'
+    };
+  }
+
+  const painelRank = groupParadasBy(baseParadas, 'nome');
+  const turnoRank = groupParadasBy(baseParadas, 'turno');
+  const turmaRank = groupParadasBy(baseParadas, 'turma');
+  const totalMinutos = baseParadas.reduce((acc, item) => acc + getDurationInMinutes(item), 0);
+
+  const wantsPainel = pergunta.includes('painel');
+  const wantsTurno = pergunta.includes('turno');
+  const wantsTurma = pergunta.includes('turma');
+  const wantsMost = pergunta.includes('mais') || pergunta.includes('maior');
+  const wantsTotalTime = pergunta.includes('tempo total') || pergunta.includes('horario total') || pergunta.includes('duracao total');
+  const wantsCount = pergunta.includes('quantas') || pergunta.includes('quantidade') || pergunta.includes('total de paradas') || pergunta.includes('total de parada');
+
+  if (wantsPainel && wantsMost) {
+    const top = painelRank[0];
+    return {
+      title: 'Painel com mais paradas',
+      content: `O painel ${top.label} teve mais paradas: ${top.quantidade} registros, somando ${formatMinutes(top.minutos)}.`
+    };
+  }
+
+  if (wantsTurno && wantsMost) {
+    const top = turnoRank[0];
+    return {
+      title: 'Turno com mais paradas',
+      content: `O turno ${top.label} lidera com ${top.quantidade} registros e ${formatMinutes(top.minutos)} de parada acumulada.`
+    };
+  }
+
+  if (wantsTurma && wantsMost) {
+    const top = turmaRank[0];
+    return {
+      title: 'Turma com mais paradas',
+      content: `A turma ${top.label} teve ${top.quantidade} paradas, totalizando ${formatMinutes(top.minutos)}.`
+    };
+  }
+
+  if (wantsTotalTime) {
+    return {
+      title: 'Tempo total de parada',
+      content: `O tempo total acumulado nas paradas e ${formatMinutes(totalMinutos)}.`
+    };
+  }
+
+  if (wantsCount) {
+    return {
+      title: 'Quantidade de paradas',
+      content: `Foram registradas ${baseParadas.length} paradas no historico analisado.`
+    };
+  }
+
+  return {
+    title: 'Pergunta nao reconhecida',
+    content: 'Tente perguntar sobre painel, turno, turma, quantidade total ou tempo total de parada.'
+  };
+}
+
 function LinkButton({ to, children }) {
   return (
     <NavLink
@@ -190,6 +301,7 @@ function DashboardPage() {
         <LinkButton to="/relatorio-turnos">Relatorio por Turno</LinkButton>
         <LinkButton to="/historico-opcoes">Historico por Opcao</LinkButton>
         <LinkButton to="/dashboard-turnos">Dashboard por Turno</LinkButton>
+        <LinkButton to="/agente-ia">Agente IA</LinkButton>
         {equipamentos.some((e) => e.status === 'parado') && (
           <button type="button" className="btn excluir" onClick={limparStatusParado}>Limpar Status Parado</button>
         )}
@@ -1123,6 +1235,129 @@ function RelatorioPorTurnoPage() {
   );
 }
 
+function AgenteIAPage() {
+  const [historicoParadas, setHistoricoParadas] = useState([]);
+  const [pergunta, setPergunta] = useState('');
+  const [resposta, setResposta] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadHistorico() {
+      const state = await getState();
+      if (!active) {
+        return;
+      }
+
+      setHistoricoParadas(Array.isArray(state.historicoParadas) ? state.historicoParadas : []);
+    }
+
+    loadHistorico();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const baseParadas = useMemo(() => toParadaBase(historicoParadas), [historicoParadas]);
+
+  const rankingPaineis = useMemo(() => {
+    return groupParadasBy(baseParadas, 'nome').slice(0, 5);
+  }, [baseParadas]);
+
+  const totalMinutos = useMemo(() => {
+    return baseParadas.reduce((total, item) => total + getDurationInMinutes(item), 0);
+  }, [baseParadas]);
+
+  function enviarPergunta(event) {
+    event.preventDefault();
+    setResposta(buildAgentReply(pergunta, historicoParadas));
+  }
+
+  function usarSugestao(texto) {
+    setPergunta(texto);
+    setResposta(buildAgentReply(texto, historicoParadas));
+  }
+
+  return (
+    <main className="page-shell">
+      <Header title="Agente IA - Perguntas Rapidas" />
+
+      <div className="page-actions">
+        <LinkButton to="/">Voltar ao painel</LinkButton>
+      </div>
+
+      <section className="summary-cards">
+        <article className="card">
+          <span>Paradas analisadas</span>
+          <strong>{baseParadas.length}</strong>
+        </article>
+        <article className="card">
+          <span>Tempo total de parada</span>
+          <strong>{formatMinutes(totalMinutos)}</strong>
+        </article>
+      </section>
+
+      <section className="card ai-agent-box">
+        <h2>Faca sua pergunta</h2>
+        <form className="ai-agent-form" onSubmit={enviarPergunta}>
+          <div className="form-field form-field-wide">
+            <label htmlFor="perguntaIa">Pergunta</label>
+            <textarea
+              id="perguntaIa"
+              rows="3"
+              placeholder="Ex.: qual painel teve mais parada?"
+              value={pergunta}
+              onChange={(event) => setPergunta(event.target.value)}
+            />
+          </div>
+          <div className="form-actions">
+            <button type="submit">Perguntar ao agente</button>
+          </div>
+        </form>
+
+        <div className="ai-agent-suggestions" aria-label="Sugestoes de perguntas">
+          <button type="button" className="btn secundario" onClick={() => usarSugestao('qual painel teve mais parada?')}>Qual painel teve mais parada?</button>
+          <button type="button" className="btn secundario" onClick={() => usarSugestao('qual turno teve mais parada?')}>Qual turno teve mais parada?</button>
+          <button type="button" className="btn secundario" onClick={() => usarSugestao('qual turma teve mais parada?')}>Qual turma teve mais parada?</button>
+          <button type="button" className="btn secundario" onClick={() => usarSugestao('qual o tempo total de parada?')}>Qual o tempo total de parada?</button>
+        </div>
+
+        {resposta && (
+          <article className="ai-answer-card">
+            <h3>{resposta.title}</h3>
+            <p>{resposta.content}</p>
+          </article>
+        )}
+      </section>
+
+      <h2>Ranking de paineis com mais paradas</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Painel</th>
+            <th>Total de paradas</th>
+            <th>Tempo acumulado</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rankingPaineis.map((item) => (
+            <tr key={item.label}>
+              <td data-label="Painel">{item.label}</td>
+              <td data-label="Total de paradas">{item.quantidade}</td>
+              <td data-label="Tempo acumulado">{formatMinutes(item.minutos)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {rankingPaineis.length === 0 && <div className="empty-state">Nenhuma parada registrada para analise.</div>}
+
+      <PageFooter />
+    </main>
+  );
+}
+
 export default function App() {
   return (
     <Routes>
@@ -1131,6 +1366,7 @@ export default function App() {
       <Route path="/relatorio-turnos" element={<RelatorioPorTurnoPage />} />
       <Route path="/historico-opcoes" element={<HistoricoOpcoesPage />} />
       <Route path="/dashboard-turnos" element={<DashboardTurnosPage />} />
+      <Route path="/agente-ia" element={<AgenteIAPage />} />
     </Routes>
   );
 }
