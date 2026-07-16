@@ -1,6 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
-import { getRelatorioTurnosNotas, getState, saveHistoricoParadas, saveRelatorioTurnosNotas, saveState } from './store';
+import {
+  clearAccessAuditLogs,
+  clearAllAuditLogs,
+  fetchAuditLogs,
+  getCurrentSession,
+  getIsCurrentUserAdmin,
+  getRelatorioTurnosNotas,
+  getState,
+  getStorageStatus,
+  saveHistoricoParadas,
+  saveRelatorioTurnosNotas,
+  saveState,
+  signInWithPassword,
+  signOut,
+  signUpWithPassword,
+  subscribeAuthChanges,
+  writeAuditLog
+} from './store';
 import { formatDateTime, formatMinutes, getDurationInMinutes } from './utils';
 
 const HISTORICO_OBSERVACOES_KEY = 'mina_historico_observacoes_v1';
@@ -115,6 +132,324 @@ function buildAgentReply(question, historicoParadas) {
     title: 'Pergunta nao reconhecida',
     content: 'Tente perguntar sobre painel, turno, turma, quantidade total ou tempo total de parada.'
   };
+}
+
+function SessionBar({ email, isAdmin, onSignOut }) {
+  return (
+    <div className="session-bar">
+      <span>Sessao ativa: {email || 'Usuario autenticado'}</span>
+      <div className="session-actions">
+        {isAdmin && <LinkButton to="/admin-auditoria">Auditoria Admin</LinkButton>}
+        <button type="button" className="btn secundario" onClick={onSignOut}>Sair</button>
+      </div>
+    </div>
+  );
+}
+
+function AdminAuditoriaPage({ isAdmin }) {
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [infoMessage, setInfoMessage] = useState('');
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadLogs() {
+      setLoading(true);
+      setError('');
+
+      try {
+        const result = await fetchAuditLogs(300);
+
+        if (!active) {
+          return;
+        }
+
+        setLogs(result);
+        await writeAuditLog('admin_visualizou_auditoria', {
+          totalRegistrosVisiveis: Array.isArray(result) ? result.length : 0
+        });
+      } catch (loadError) {
+        if (active) {
+          setError(loadError?.message || 'Nao foi possivel carregar os logs de auditoria.');
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    if (isAdmin) {
+      loadLogs();
+    } else {
+      setLoading(false);
+      setLogs([]);
+      setError('Acesso restrito ao administrador.');
+    }
+
+    return () => {
+      active = false;
+    };
+  }, [isAdmin]);
+
+  async function recarregarLogs() {
+    setLoading(true);
+    setError('');
+    setInfoMessage('');
+
+    try {
+      const result = await fetchAuditLogs(300);
+      setLogs(result);
+    } catch (loadError) {
+      setError(loadError?.message || 'Nao foi possivel atualizar os logs.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function limparAcessos() {
+    const confirmacao = window.confirm('Deseja realmente limpar os registros de acesso (login/logout)?');
+
+    if (!confirmacao) {
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setInfoMessage('');
+
+    try {
+      const removidos = await clearAccessAuditLogs();
+      const result = await fetchAuditLogs(300);
+      setLogs(result);
+      setInfoMessage(`Registros de acesso removidos: ${removidos}.`);
+    } catch (loadError) {
+      setError(loadError?.message || 'Nao foi possivel limpar os acessos.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function limparTudo() {
+    const confirmacao1 = window.confirm('Esta acao vai limpar todos os registros da Auditoria Administrativa. Deseja continuar?');
+
+    if (!confirmacao1) {
+      return;
+    }
+
+    const confirmacao2 = window.confirm('Confirmacao final: todos os logs da auditoria serao apagados.');
+
+    if (!confirmacao2) {
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setInfoMessage('');
+
+    try {
+      const removidos = await clearAllAuditLogs();
+      setLogs([]);
+      setInfoMessage(`Limpeza da auditoria concluida. Registros removidos: ${removidos}.`);
+    } catch (loadError) {
+      setError(loadError?.message || 'Nao foi possivel limpar os registros da auditoria.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main className="page-shell">
+      <Header title="Auditoria Administrativa" />
+
+      <div className="page-actions">
+        <LinkButton to="/">Voltar ao painel</LinkButton>
+        <button type="button" className="btn secundario" onClick={recarregarLogs} disabled={loading || !isAdmin}>
+          Atualizar
+        </button>
+        <button type="button" className="btn perigo" onClick={limparAcessos} disabled={loading || !isAdmin}>
+          Limpar acessos
+        </button>
+        <button type="button" className="btn perigo" onClick={limparTudo} disabled={loading || !isAdmin}>
+          Limpar auditoria
+        </button>
+      </div>
+
+      {loading && <div className="alert alert-info">Carregando logs de auditoria...</div>}
+      {error && <div className="alert alert-danger">{error}</div>}
+      {infoMessage && <div className="alert alert-success">{infoMessage}</div>}
+
+      {!loading && !error && (
+        <>
+          <section className="summary-cards">
+            <article className="card">
+              <span>Total de eventos</span>
+              <strong>{logs.length}</strong>
+            </article>
+          </section>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Data/Hora</th>
+                <th>Usuario</th>
+                <th>Acao</th>
+                <th>Detalhes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map((item) => (
+                <tr key={item.id}>
+                  <td data-label="Data/Hora">{item.created_at ? formatDateTime(new Date(item.created_at)) : '-'}</td>
+                  <td data-label="Usuario">{item.actor_email || item.actor_id || '-'}</td>
+                  <td data-label="Acao">{item.action || '-'}</td>
+                  <td data-label="Detalhes" className="audit-details-cell">
+                    <pre>{JSON.stringify(item.details || {}, null, 2)}</pre>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {logs.length === 0 && <div className="empty-state">Nenhum evento de auditoria registrado.</div>}
+        </>
+      )}
+
+      <PageFooter />
+    </main>
+  );
+}
+
+function AuthUnavailablePage({ missingEnvVars }) {
+  return (
+    <main className="page-shell auth-shell">
+      <Header title="Configuracao de seguranca pendente" />
+      <div className="auth-card">
+        <p>
+          Para proteger o sistema com login e senha, configure as variaveis do Supabase no ambiente.
+        </p>
+        <ul>
+          {missingEnvVars.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+        <p>
+          Assim que elas estiverem definidas, recarregue a pagina para habilitar a autenticacao.
+        </p>
+      </div>
+    </main>
+  );
+}
+
+function AuthPage() {
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setError('');
+    setMessage('');
+
+    const safeEmail = email.trim();
+
+    if (!safeEmail || !password) {
+      setError('Preencha e-mail e senha.');
+      return;
+    }
+
+    if (password.length < 8) {
+      setError('Use uma senha com no minimo 8 caracteres.');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      if (isSignUp) {
+        const result = await signUpWithPassword(safeEmail, password);
+
+        if (result?.session) {
+          setMessage('Conta criada e login realizado com sucesso.');
+        } else {
+          setMessage('Conta criada. Verifique seu e-mail para confirmar o acesso.');
+        }
+      } else {
+        await signInWithPassword(safeEmail, password);
+      }
+    } catch (authError) {
+      setError(authError?.message || 'Nao foi possivel autenticar.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main className="page-shell auth-shell">
+      <Header title="Acesso Seguro" />
+
+      <section className="auth-card">
+        <h2>{isSignUp ? 'Criar conta' : 'Entrar no sistema'}</h2>
+        <p className="auth-subtitle">
+          Acesso restrito por e-mail e senha para proteger os dados de manutencao.
+        </p>
+
+        <form className="auth-form" onSubmit={handleSubmit}>
+          <div className="form-field auth-field">
+            <label htmlFor="auth-email">E-mail</label>
+            <input
+              id="auth-email"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="seuemail@empresa.com"
+              required
+            />
+          </div>
+
+          <div className="form-field auth-field">
+            <label htmlFor="auth-password">Senha</label>
+            <input
+              id="auth-password"
+              type="password"
+              autoComplete={isSignUp ? 'new-password' : 'current-password'}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Minimo 8 caracteres"
+              required
+            />
+          </div>
+
+          {error && <div className="alert alert-danger">{error}</div>}
+          {message && <div className="alert alert-success">{message}</div>}
+
+          <div className="form-actions auth-actions">
+            <button type="submit" disabled={loading}>
+              {loading ? 'Aguarde...' : isSignUp ? 'Criar conta' : 'Entrar'}
+            </button>
+            <button
+              type="button"
+              className="btn secundario"
+              onClick={() => {
+                setIsSignUp((value) => !value);
+                setError('');
+                setMessage('');
+              }}
+              disabled={loading}
+            >
+              {isSignUp ? 'Ja tenho conta' : 'Criar nova conta'}
+            </button>
+          </div>
+        </form>
+      </section>
+    </main>
+  );
 }
 
 function LinkButton({ to, children }) {
@@ -1359,14 +1694,115 @@ function AgenteIAPage() {
 }
 
 export default function App() {
+  const storageStatus = useMemo(() => getStorageStatus(), []);
+  const [authLoading, setAuthLoading] = useState(storageStatus.authEnabled);
+  const [session, setSession] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    if (!storageStatus.authEnabled) {
+      setAuthLoading(false);
+      return () => {};
+    }
+
+    let active = true;
+
+    async function refreshAdminFlag(nextSession) {
+      if (!nextSession) {
+        if (active) {
+          setIsAdmin(false);
+        }
+        return;
+      }
+
+      try {
+        const admin = await getIsCurrentUserAdmin();
+
+        if (active) {
+          setIsAdmin(Boolean(admin));
+        }
+      } catch {
+        if (active) {
+          setIsAdmin(false);
+        }
+      }
+    }
+
+    async function initSession() {
+      try {
+        const currentSession = await getCurrentSession();
+
+        if (!active) {
+          return;
+        }
+
+        setSession(currentSession);
+        await refreshAdminFlag(currentSession);
+      } catch {
+        if (active) {
+          setSession(null);
+          setIsAdmin(false);
+        }
+      } finally {
+        if (active) {
+          setAuthLoading(false);
+        }
+      }
+    }
+
+    initSession();
+
+    const unsubscribe = subscribeAuthChanges((nextSession) => {
+      if (active) {
+        setSession(nextSession);
+      }
+
+      refreshAdminFlag(nextSession);
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [storageStatus.authEnabled]);
+
+  async function handleSignOut() {
+    await signOut();
+    setSession(null);
+    setIsAdmin(false);
+  }
+
+  if (authLoading) {
+    return (
+      <main className="page-shell auth-shell">
+        <Header title="Validando acesso" />
+        <div className="auth-card">
+          <p>Carregando sessao de seguranca...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (!storageStatus.authEnabled) {
+    return <AuthUnavailablePage missingEnvVars={storageStatus.missingEnvVars} />;
+  }
+
+  if (!session) {
+    return <AuthPage />;
+  }
+
   return (
-    <Routes>
-      <Route path="/" element={<DashboardPage />} />
-      <Route path="/historico" element={<HistoricoPage />} />
-      <Route path="/relatorio-turnos" element={<RelatorioPorTurnoPage />} />
-      <Route path="/historico-opcoes" element={<HistoricoOpcoesPage />} />
-      <Route path="/dashboard-turnos" element={<DashboardTurnosPage />} />
-      <Route path="/agente-ia" element={<AgenteIAPage />} />
-    </Routes>
+    <>
+      <SessionBar email={session?.user?.email} isAdmin={isAdmin} onSignOut={handleSignOut} />
+      <Routes>
+        <Route path="/" element={<DashboardPage />} />
+        <Route path="/historico" element={<HistoricoPage />} />
+        <Route path="/relatorio-turnos" element={<RelatorioPorTurnoPage />} />
+        <Route path="/historico-opcoes" element={<HistoricoOpcoesPage />} />
+        <Route path="/dashboard-turnos" element={<DashboardTurnosPage />} />
+        <Route path="/agente-ia" element={<AgenteIAPage />} />
+        <Route path="/admin-auditoria" element={<AdminAuditoriaPage isAdmin={isAdmin} />} />
+      </Routes>
+    </>
   );
 }

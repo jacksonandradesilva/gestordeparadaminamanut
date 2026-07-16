@@ -2,7 +2,13 @@ import { createClient } from '@supabase/supabase-js';
 
 const STORAGE_KEY = 'mina_status_store_v1';
 const TABLE_NAME = 'app_state';
+const AUDIT_TABLE_NAME = 'audit_logs';
+const ADMIN_TABLE_NAME = 'admin_users';
 const STATE_ID = 'global';
+
+function getUserStorageKey(userId) {
+  return `${STORAGE_KEY}_${userId}`;
+}
 
 function normalizeSupabaseUrl(url) {
   if (!url) {
@@ -54,16 +60,260 @@ const supabase = hasRemoteConfig
 
 logStorageModeNotice();
 
+async function requireAuthenticatedUser() {
+  if (!supabase) {
+    return null;
+  }
+
+  const { data, error } = await supabase.auth.getUser();
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data?.user) {
+    throw new Error('Usuario nao autenticado. Faca login para acessar os dados.');
+  }
+
+  return data.user;
+}
+
+export function isAuthEnabled() {
+  return Boolean(supabase);
+}
+
+export async function getCurrentSession() {
+  if (!supabase) {
+    return null;
+  }
+
+  const { data, error } = await supabase.auth.getSession();
+
+  if (error) {
+    throw error;
+  }
+
+  return data.session;
+}
+
+export function subscribeAuthChanges(callback) {
+  if (!supabase) {
+    return () => {};
+  }
+
+  const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+    callback(session);
+  });
+
+  return () => {
+    data.subscription.unsubscribe();
+  };
+}
+
+export async function signInWithPassword(email, password) {
+  if (!supabase) {
+    throw new Error('Supabase nao configurado. Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.');
+  }
+
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  await writeAuditLog('auth_login_sucesso', {
+    descricao: 'Usuario autenticou com e-mail e senha.'
+  });
+
+  return data.session;
+}
+
+export async function signUpWithPassword(email, password) {
+  if (!supabase) {
+    throw new Error('Supabase nao configurado. Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.');
+  }
+
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password
+  });
+
+  if (error) {
+    throw error;
+  }
+
+  await writeAuditLog('auth_conta_criada', {
+    descricao: 'Nova conta criada com e-mail e senha.'
+  });
+
+  return data;
+}
+
+export async function signOut() {
+  if (!supabase) {
+    return;
+  }
+
+  const {
+    data: { user }
+  } = await supabase.auth.getUser().catch(() => ({ data: { user: null } }));
+
+  if (user?.id) {
+    await writeAuditLog('auth_logout', {
+      descricao: 'Usuario encerrou a sessao.'
+    });
+
+    window.localStorage.removeItem(getUserStorageKey(user.id));
+  }
+
+  const { error } = await supabase.auth.signOut();
+
+  if (error) {
+    throw error;
+  }
+}
+
 export function getStorageStatus() {
   return {
     mode: storageMode,
     hasRemoteConfig,
+    authEnabled: Boolean(supabase),
     supabaseUrl: SUPABASE_URL,
     missingEnvVars: [
       ...(SUPABASE_URL ? [] : ['VITE_SUPABASE_URL']),
       ...(SUPABASE_ANON_KEY ? [] : ['VITE_SUPABASE_ANON_KEY'])
     ]
   };
+}
+
+export async function getIsCurrentUserAdmin() {
+  if (!supabase) {
+    return false;
+  }
+
+  const user = await requireAuthenticatedUser();
+
+  const { data, error } = await supabase
+    .from(ADMIN_TABLE_NAME)
+    .select('user_id')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return Boolean(data?.user_id);
+}
+
+export async function writeAuditLog(action, details = {}) {
+  if (!supabase) {
+    return;
+  }
+
+  try {
+    const user = await requireAuthenticatedUser();
+
+    const { error } = await supabase
+      .from(AUDIT_TABLE_NAME)
+      .insert({
+        actor_id: user.id,
+        actor_email: user.email || null,
+        action,
+        details: details && typeof details === 'object' ? details : { valor: String(details || '') }
+      });
+
+    if (error) {
+      throw error;
+    }
+  } catch (error) {
+    console.warn('Falha ao registrar log de auditoria:', error);
+  }
+}
+
+export async function fetchAuditLogs(limit = 200) {
+  if (!supabase) {
+    return [];
+  }
+
+  const isAdmin = await getIsCurrentUserAdmin();
+
+  if (!isAdmin) {
+    throw new Error('Acesso negado. Somente administrador pode visualizar auditoria.');
+  }
+
+  const { data, error } = await supabase
+    .from(AUDIT_TABLE_NAME)
+    .select('id, created_at, actor_id, actor_email, action, details')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    throw error;
+  }
+
+  return Array.isArray(data) ? data : [];
+}
+
+export async function clearAccessAuditLogs() {
+  if (!supabase) {
+    return 0;
+  }
+
+  const isAdmin = await getIsCurrentUserAdmin();
+
+  if (!isAdmin) {
+    throw new Error('Acesso negado. Somente administrador pode limpar acessos.');
+  }
+
+  const accessActions = [
+    'auth_login_sucesso',
+    'auth_logout',
+    'admin_visualizou_auditoria'
+  ];
+
+  const { data, error } = await supabase
+    .from(AUDIT_TABLE_NAME)
+    .delete()
+    .in('action', accessActions)
+    .select('id');
+
+  if (error) {
+    throw error;
+  }
+
+  await writeAuditLog('admin_limpou_acessos', {
+    totalRemovido: Array.isArray(data) ? data.length : 0
+  });
+
+  return Array.isArray(data) ? data.length : 0;
+}
+
+export async function clearAllAuditLogs() {
+  if (!supabase) {
+    return 0;
+  }
+
+  const isAdmin = await getIsCurrentUserAdmin();
+
+  if (!isAdmin) {
+    throw new Error('Acesso negado. Somente administrador pode limpar a auditoria.');
+  }
+
+  const { data: auditsDeleted, error: auditError } = await supabase
+    .from(AUDIT_TABLE_NAME)
+    .delete()
+    .not('id', 'is', null)
+    .select('id');
+
+  if (auditError) {
+    throw auditError;
+  }
+
+  return Array.isArray(auditsDeleted) ? auditsDeleted.length : 0;
 }
 
 function getEmptyState() {
@@ -90,9 +340,9 @@ function cloneState(state) {
   };
 }
 
-function readLocalState() {
+function readLocalState(storageKey = STORAGE_KEY) {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(storageKey);
     if (!raw) {
       return getEmptyState();
     }
@@ -105,9 +355,9 @@ function readLocalState() {
   }
 }
 
-function writeLocalState(state) {
+function writeLocalState(state, storageKey = STORAGE_KEY) {
   const safeState = cloneState(state || {});
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(safeState));
+  window.localStorage.setItem(storageKey, JSON.stringify(safeState));
   return safeState;
 }
 
@@ -117,6 +367,8 @@ export async function getState() {
   }
 
   try {
+    const user = await requireAuthenticatedUser();
+
     const { data, error } = await supabase
       .from(TABLE_NAME)
       .select('equipamentos, historico_paradas, relatorio_turnos_notas')
@@ -129,7 +381,7 @@ export async function getState() {
 
     if (!data) {
       const emptyState = getEmptyState();
-      await saveState(emptyState);
+      await saveState(emptyState, user);
       return emptyState;
     }
 
@@ -147,9 +399,16 @@ export async function getState() {
   }
 }
 
-export async function saveState(state) {
+export async function saveState(state, authenticatedUser = null) {
   const incomingState = state && typeof state === 'object' ? state : {};
-  const currentState = readLocalState();
+  let user = null;
+  const storageKey = STORAGE_KEY;
+
+  if (supabase) {
+    user = authenticatedUser || await requireAuthenticatedUser();
+  }
+
+  const currentState = readLocalState(storageKey);
 
   // Mescla com o estado atual para evitar perda de campos em atualizacoes parciais.
   const mergedState = {
@@ -164,7 +423,7 @@ export async function saveState(state) {
       : currentState.relatorioTurnosNotas
   };
 
-  const safeState = writeLocalState(mergedState);
+  const safeState = writeLocalState(mergedState, storageKey);
 
   if (!supabase) {
     return safeState;
@@ -175,14 +434,22 @@ export async function saveState(state) {
       .from(TABLE_NAME)
       .upsert({
         id: STATE_ID,
+        owner_id: user.id,
         equipamentos: safeState.equipamentos,
         historico_paradas: safeState.historicoParadas,
         relatorio_turnos_notas: safeState.relatorioTurnosNotas
-      });
+      }, { onConflict: 'id' });
 
     if (error) {
       throw error;
     }
+
+    await writeAuditLog('estado_atualizado', {
+      equipamentosAntes: Array.isArray(currentState.equipamentos) ? currentState.equipamentos.length : 0,
+      equipamentosDepois: Array.isArray(safeState.equipamentos) ? safeState.equipamentos.length : 0,
+      historicoAntes: Array.isArray(currentState.historicoParadas) ? currentState.historicoParadas.length : 0,
+      historicoDepois: Array.isArray(safeState.historicoParadas) ? safeState.historicoParadas.length : 0
+    });
   } catch (error) {
     console.error('Falha ao salvar no Supabase, mantendo apenas cache local:', error);
   }
@@ -193,7 +460,13 @@ export async function saveState(state) {
 export async function saveHistoricoParadas(historicoParadas) {
   const current = await getState();
   current.historicoParadas = Array.isArray(historicoParadas) ? [...historicoParadas] : [];
-  return saveState(current);
+  const result = await saveState(current);
+
+  await writeAuditLog('historico_atualizado', {
+    totalRegistros: Array.isArray(current.historicoParadas) ? current.historicoParadas.length : 0
+  });
+
+  return result;
 }
 
 export async function getRelatorioTurnosNotas() {
@@ -204,5 +477,11 @@ export async function getRelatorioTurnosNotas() {
 export async function saveRelatorioTurnosNotas(notas) {
   const current = await getState();
   current.relatorioTurnosNotas = cloneRelatorioTurnosNotas(notas);
-  return saveState(current);
+  const result = await saveState(current);
+
+  await writeAuditLog('relatorio_turno_atualizado', {
+    turnosComNotas: Object.keys(current.relatorioTurnosNotas || {}).length
+  });
+
+  return result;
 }
