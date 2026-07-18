@@ -664,7 +664,7 @@ function AuthPage() {
         const result = await signUpWithPassword(safeEmail, password);
 
         if (result?.session) {
-          setMessage('Conta criada e login realizado com sucesso.');
+          setMessage('Conta criada e login realizado com sucesso. Se voce esperava confirmacao por e-mail, habilite essa opcao no painel do Supabase.');
         } else {
           setMessage('Conta criada. Verifique seu e-mail para confirmar o acesso.');
         }
