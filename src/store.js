@@ -160,9 +160,16 @@ export async function signUpWithPassword(email, password) {
     throw new Error('Supabase nao configurado. Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.');
   }
 
+  const emailRedirectTo = typeof window !== 'undefined'
+    ? window.location.origin
+    : undefined;
+
   const { data, error } = await supabase.auth.signUp({
     email,
-    password
+    password,
+    options: {
+      emailRedirectTo
+    }
   });
 
   if (error) {
