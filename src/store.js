@@ -173,6 +173,12 @@ export async function signUpWithPassword(email, password) {
   });
 
   if (error) {
+    const message = String(error?.message || '').toLowerCase();
+
+    if (message.includes('rate limit') || message.includes('too many requests')) {
+      throw new Error('Limite de envio de e-mail atingido. Aguarde alguns minutos e tente novamente, ou crie a conta mais tarde.');
+    }
+
     throw error;
   }
 
