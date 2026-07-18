@@ -1,5 +1,5 @@
 // Componente principal da aplicação
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 // Importações do React Router
 import { NavLink, Route, Routes } from 'react-router-dom';
 // Importações de componentes e funções auxiliares
@@ -639,9 +639,16 @@ function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const submitLockRef = useRef(false);
 
   async function handleSubmit(event) {
     event.preventDefault();
+
+    if (submitLockRef.current) {
+      return;
+    }
+
+    submitLockRef.current = true;
     setError('');
     setMessage('');
 
@@ -672,9 +679,16 @@ function AuthPage() {
         await signInWithPassword(safeEmail, password);
       }
     } catch (authError) {
-      setError(authError?.message || 'Nao foi possivel autenticar.');
+      const message = String(authError?.message || '').toLowerCase();
+
+      if (message.includes('rate limit') || message.includes('too many requests')) {
+        setError('Limite de envio de e-mail atingido. Aguarde alguns minutos antes de tentar novamente.');
+      } else {
+        setError(authError?.message || 'Nao foi possivel autenticar.');
+      }
     } finally {
       setLoading(false);
+      submitLockRef.current = false;
     }
   }
 
