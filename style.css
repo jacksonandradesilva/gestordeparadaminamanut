@@ -687,6 +687,25 @@ tbody tr:nth-child(even):hover {
 	color: var(--text-secondary);
 }
 
+.access-pages-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(160px, 1fr));
+	gap: 8px 10px;
+}
+
+.checkbox-inline {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 13px;
+	color: var(--text-secondary);
+}
+
+.checkbox-inline input {
+	width: 16px;
+	height: 16px;
+}
+
 .page-footer {
 	margin-top: 32px;
 	padding-top: 20px;
@@ -748,6 +767,10 @@ tbody tr:nth-child(even):hover {
 
 	.ai-agent-suggestions {
 		flex-direction: column;
+	}
+
+	.access-pages-grid {
+		grid-template-columns: 1fr;
 	}
 
 	.card {

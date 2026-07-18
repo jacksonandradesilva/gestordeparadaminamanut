@@ -4,7 +4,31 @@ const STORAGE_KEY = 'mina_status_store_v1';
 const TABLE_NAME = 'app_state';
 const AUDIT_TABLE_NAME = 'audit_logs';
 const ADMIN_TABLE_NAME = 'admin_users';
+const ACCESS_TABLE_NAME = 'user_access';
 const STATE_ID = 'global';
+
+export const PAGE_ACCESS_KEYS = [
+  'dashboard',
+  'historico',
+  'relatorio-turnos',
+  'historico-opcoes',
+  'dashboard-turnos',
+  'agente-ia'
+];
+
+function sanitizeAllowedPages(allowedPages) {
+  if (!Array.isArray(allowedPages)) {
+    return [];
+  }
+
+  const allowed = new Set(PAGE_ACCESS_KEYS);
+
+  return [...new Set(
+    allowedPages
+      .map((item) => String(item || '').trim())
+      .filter((item) => allowed.has(item))
+  )];
+}
 
 function getUserStorageKey(userId) {
   return `${STORAGE_KEY}_${userId}`;
@@ -209,6 +233,218 @@ export async function getIsCurrentUserAdmin() {
   return Boolean(data?.user_id);
 }
 
+export async function ensureCurrentUserAccessRequest() {
+  if (!supabase) {
+    return null;
+  }
+
+  const user = await requireAuthenticatedUser();
+
+  const { error } = await supabase
+    .from(ACCESS_TABLE_NAME)
+    .upsert({
+      user_id: user.id,
+      email: user.email || null,
+      status: 'pending',
+      allowed_pages: [],
+      approved_at: null,
+      approved_by: null,
+      updated_at: new Date().toISOString()
+    }, {
+      onConflict: 'user_id',
+      ignoreDuplicates: true
+    });
+
+  if (error) {
+    throw error;
+  }
+
+  return user;
+}
+
+export async function getCurrentUserAccessProfile() {
+  if (!supabase) {
+    return {
+      user_id: null,
+      email: null,
+      status: 'approved'
+    };
+  }
+
+  const user = await ensureCurrentUserAccessRequest();
+
+  const { data, error } = await supabase
+    .from(ACCESS_TABLE_NAME)
+    .select('user_id, email, status, allowed_pages, approved_at, approved_by, created_at, updated_at')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data || {
+    user_id: user.id,
+    email: user.email || null,
+    status: 'pending',
+    allowed_pages: [],
+    approved_at: null,
+    approved_by: null,
+    created_at: null,
+    updated_at: null
+  };
+}
+
+export async function fetchManagedUserAccesses() {
+  if (!supabase) {
+    return [];
+  }
+
+  const isAdmin = await getIsCurrentUserAdmin();
+
+  if (!isAdmin) {
+    throw new Error('Acesso negado. Somente administrador pode gerenciar liberacoes.');
+  }
+
+  const { data, error } = await supabase
+    .from(ACCESS_TABLE_NAME)
+    .select('user_id, email, status, allowed_pages, approved_at, approved_by, created_at, updated_at')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return Array.isArray(data) ? data : [];
+}
+
+export async function updateUserAccessStatus(targetUserId, status, allowedPages = null) {
+  if (!supabase) {
+    return null;
+  }
+
+  const isAdmin = await getIsCurrentUserAdmin();
+
+  if (!isAdmin) {
+    throw new Error('Acesso negado. Somente administrador pode liberar usuarios.');
+  }
+
+  if (!targetUserId) {
+    throw new Error('Usuario alvo nao informado.');
+  }
+
+  if (!['pending', 'approved'].includes(status)) {
+    throw new Error('Status de acesso invalido.');
+  }
+
+  const adminUser = await requireAuthenticatedUser();
+  const isApproved = status === 'approved';
+  const safeAllowedPages = sanitizeAllowedPages(allowedPages);
+
+  const payload = {
+    user_id: targetUserId,
+    status,
+    allowed_pages: isApproved
+      ? (safeAllowedPages.length > 0 ? safeAllowedPages : PAGE_ACCESS_KEYS)
+      : (safeAllowedPages.length > 0 ? safeAllowedPages : []),
+    approved_at: isApproved ? new Date().toISOString() : null,
+    approved_by: isApproved ? adminUser.id : null,
+    updated_at: new Date().toISOString()
+  };
+
+  const { data, error } = await supabase
+    .from(ACCESS_TABLE_NAME)
+    .upsert(payload, { onConflict: 'user_id' })
+    .select('user_id, email, status, allowed_pages, approved_at, approved_by, created_at, updated_at')
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  await writeAuditLog(isApproved ? 'admin_liberou_usuario' : 'admin_retorno_usuario_para_pendente', {
+    usuarioAlvo: targetUserId,
+    status
+  });
+
+  return data;
+}
+
+export async function updateUserAccessPermissions(targetUserId, allowedPages) {
+  if (!supabase) {
+    return null;
+  }
+
+  const isAdmin = await getIsCurrentUserAdmin();
+
+  if (!isAdmin) {
+    throw new Error('Acesso negado. Somente administrador pode ajustar paginas liberadas.');
+  }
+
+  if (!targetUserId) {
+    throw new Error('Usuario alvo nao informado.');
+  }
+
+  const safeAllowedPages = sanitizeAllowedPages(allowedPages);
+
+  const { data, error } = await supabase
+    .from(ACCESS_TABLE_NAME)
+    .upsert({
+      user_id: targetUserId,
+      allowed_pages: safeAllowedPages,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id' })
+    .select('user_id, email, status, allowed_pages, approved_at, approved_by, created_at, updated_at')
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  await writeAuditLog('admin_atualizou_paginas_usuario', {
+    usuarioAlvo: targetUserId,
+    paginasLiberadas: safeAllowedPages
+  });
+
+  return data;
+}
+
+export async function deleteUserAccess(targetUserId) {
+  if (!supabase) {
+    return false;
+  }
+
+  const isAdmin = await getIsCurrentUserAdmin();
+
+  if (!isAdmin) {
+    throw new Error('Acesso negado. Somente administrador pode excluir cadastro de acesso.');
+  }
+
+  if (!targetUserId) {
+    throw new Error('Usuario alvo nao informado.');
+  }
+
+  const { data: deletedRows, error } = await supabase
+    .from(ACCESS_TABLE_NAME)
+    .delete()
+    .eq('user_id', targetUserId)
+    .select('user_id');
+
+  if (error) {
+    throw error;
+  }
+
+  const removed = Array.isArray(deletedRows) && deletedRows.length > 0;
+
+  if (removed) {
+    await writeAuditLog('admin_excluiu_cadastro_acesso_usuario', {
+      usuarioAlvo: targetUserId
+    });
+  }
+
+  return removed;
+}
+
 export async function writeAuditLog(action, details = {}) {
   if (!supabase) {
     return;
@@ -315,7 +551,7 @@ export async function clearAllAuditLogs() {
 
   return Array.isArray(auditsDeleted) ? auditsDeleted.length : 0;
 }
-
+// Funções auxiliares para manipulação do estado
 function getEmptyState() {
   return {
     equipamentos: [],
@@ -323,7 +559,7 @@ function getEmptyState() {
     relatorioTurnosNotas: {}
   };
 }
-
+// Clona o objeto relatorioTurnosNotas para evitar mutações externas
 function cloneRelatorioTurnosNotas(notas) {
   if (!notas || typeof notas !== 'object' || Array.isArray(notas)) {
     return {};
@@ -331,7 +567,7 @@ function cloneRelatorioTurnosNotas(notas) {
 
   return { ...notas };
 }
-
+// Clona o estado para evitar mutações externas
 function cloneState(state) {
   return {
     equipamentos: Array.isArray(state?.equipamentos) ? [...state.equipamentos] : [],
@@ -339,7 +575,7 @@ function cloneState(state) {
     relatorioTurnosNotas: cloneRelatorioTurnosNotas(state?.relatorioTurnosNotas)
   };
 }
-
+// Lê o estado do localStorage, retornando um estado vazio em caso de erro
 function readLocalState(storageKey = STORAGE_KEY) {
   try {
     const raw = window.localStorage.getItem(storageKey);
@@ -354,7 +590,7 @@ function readLocalState(storageKey = STORAGE_KEY) {
     return getEmptyState();
   }
 }
-
+// Escreve o estado no localStorage, retornando o estado seguro
 function writeLocalState(state, storageKey = STORAGE_KEY) {
   const safeState = cloneState(state || {});
   window.localStorage.setItem(storageKey, JSON.stringify(safeState));

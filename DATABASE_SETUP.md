@@ -25,6 +25,11 @@ Esse usuario tera acesso a pagina `Auditoria Admin` e podera ver:
 - Dia e hora dos acessos.
 - Alteracoes realizadas no sistema.
 
+Agora ele tambem tera acesso a pagina `Liberacao de Acessos`, onde pode:
+- Ver quem se cadastrou.
+- Liberar usuarios pendentes.
+- Voltar um usuario para pendente para bloquear o acesso as paginas.
+
 ### Atualizacao para quem ja tinha banco criado
 Se sua tabela `app_state` ja existia antes, execute tambem este SQL:
 
@@ -41,6 +46,16 @@ alter table public.app_state
 create table if not exists public.admin_users (
    user_id uuid primary key references auth.users(id) on delete cascade,
    created_at timestamptz not null default now()
+);
+
+create table if not exists public.user_access (
+   user_id uuid primary key references auth.users(id) on delete cascade,
+   email text,
+   status text not null default 'pending',
+   approved_at timestamptz,
+   approved_by uuid references auth.users(id) on delete set null,
+   created_at timestamptz not null default now(),
+   updated_at timestamptz not null default now()
 );
 
 create table if not exists public.audit_logs (
@@ -88,4 +103,5 @@ Depois faca novo deploy (ou use Redeploy) para as variaveis entrarem no build.
 
 ## Observacao
 - Com variaveis definidas, o acesso exige login com e-mail/senha.
+- Toda nova conta entra como `pendente` e so acessa as paginas depois que um administrador liberar.
 - Com RLS ativo, usuarios autenticados compartilham os mesmos dados operacionais (registro global `id = 'global'`).
