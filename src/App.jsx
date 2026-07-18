@@ -1,10 +1,805 @@
+// Componente principal da aplicação
 import { useEffect, useMemo, useState } from 'react';
+// Importações do React Router
 import { NavLink, Route, Routes } from 'react-router-dom';
-import { getRelatorioTurnosNotas, getState, saveHistoricoParadas, saveRelatorioTurnosNotas, saveState } from './store';
+// Importações de componentes e funções auxiliares
+import {
+  clearAccessAuditLogs,
+  clearAllAuditLogs,
+  deleteUserAccess,
+  PAGE_ACCESS_KEYS,
+  fetchAuditLogs,
+  fetchManagedUserAccesses,
+  getCurrentSession,
+  getIsCurrentUserAdmin,
+  getCurrentUserAccessProfile,
+  getRelatorioTurnosNotas,
+  getState,
+  getStorageStatus,
+  saveHistoricoParadas,
+  saveRelatorioTurnosNotas,
+  saveState,
+  signInWithPassword,
+  signOut,
+  signUpWithPassword,
+  subscribeAuthChanges,
+  updateUserAccessPermissions,
+  updateUserAccessStatus,
+  writeAuditLog
+} from './store';
+// Importações de componentes de página
 import { formatDateTime, formatMinutes, getDurationInMinutes } from './utils';
-
+// Importações de estilos
 const HISTORICO_OBSERVACOES_KEY = 'mina_historico_observacoes_v1';
 const TURNOS = ['A', 'B', 'C', 'D'];
+const PAGE_ACCESS_OPTIONS = [
+  { key: 'dashboard', label: 'Painel principal', path: '/' },
+  { key: 'historico', label: 'Gestao de parada', path: '/historico' },
+  { key: 'relatorio-turnos', label: 'Relatorio por turno', path: '/relatorio-turnos' },
+  { key: 'historico-opcoes', label: 'Historico por opcao', path: '/historico-opcoes' },
+  { key: 'dashboard-turnos', label: 'Dashboard por turno', path: '/dashboard-turnos' },
+  { key: 'agente-ia', label: 'Agente IA', path: '/agente-ia' }
+];
+
+function normalizeAllowedPages(pages) {
+  if (!Array.isArray(pages)) {
+    return [];
+  }
+
+  const validKeys = new Set(PAGE_ACCESS_KEYS);
+
+  return [...new Set(
+    pages
+      .map((item) => String(item || '').trim())
+      .filter((item) => validKeys.has(item))
+  )];
+}
+
+function getPageLabelByKey(pageKey) {
+  const found = PAGE_ACCESS_OPTIONS.find((item) => item.key === pageKey);
+  return found?.label || pageKey;
+}
+// Função para normalizar texto, removendo acentos e convertendo para minúsculas
+function normalizeText(text) {
+  return String(text || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+function toParadaBase(historicoParadas) {
+  const list = Array.isArray(historicoParadas) ? historicoParadas : [];
+  const onlyParado = list.filter((item) => normalizeText(item?.status) === 'parado');
+  return onlyParado.length > 0 ? onlyParado : list;
+}
+
+function groupParadasBy(list, fieldName) {
+  const grouped = new Map();
+
+  list.forEach((item) => {
+    const key = String(item?.[fieldName] || 'Nao informado').trim() || 'Nao informado';
+    const prev = grouped.get(key) || { label: key, quantidade: 0, minutos: 0 };
+
+    grouped.set(key, {
+      label: key,
+      quantidade: prev.quantidade + 1,
+      minutos: prev.minutos + getDurationInMinutes(item)
+    });
+  });
+
+  return [...grouped.values()].sort((a, b) => {
+    if (b.quantidade !== a.quantidade) {
+      return b.quantidade - a.quantidade;
+    }
+
+    return b.minutos - a.minutos;
+  });
+}
+
+function buildAgentReply(question, historicoParadas) {
+  const pergunta = normalizeText(question);
+  const baseParadas = toParadaBase(historicoParadas);
+
+  if (!pergunta) {
+    return {
+      title: 'Escreva uma pergunta',
+      content: 'Exemplo: qual painel teve mais parada?'
+    };
+  }
+
+  if (baseParadas.length === 0) {
+    return {
+      title: 'Sem dados para analisar',
+      content: 'Ainda nao existem registros de parada no historico.'
+    };
+  }
+
+  const painelRank = groupParadasBy(baseParadas, 'nome');
+  const turnoRank = groupParadasBy(baseParadas, 'turno');
+  const turmaRank = groupParadasBy(baseParadas, 'turma');
+  const totalMinutos = baseParadas.reduce((acc, item) => acc + getDurationInMinutes(item), 0);
+
+  const wantsPainel = pergunta.includes('painel');
+  const wantsTurno = pergunta.includes('turno');
+  const wantsTurma = pergunta.includes('turma');
+  const wantsMost = pergunta.includes('mais') || pergunta.includes('maior');
+  const wantsTotalTime = pergunta.includes('tempo total') || pergunta.includes('horario total') || pergunta.includes('duracao total');
+  const wantsCount = pergunta.includes('quantas') || pergunta.includes('quantidade') || pergunta.includes('total de paradas') || pergunta.includes('total de parada');
+
+  if (wantsPainel && wantsMost) {
+    const top = painelRank[0];
+    return {
+      title: 'Painel com mais paradas',
+      content: `O painel ${top.label} teve mais paradas: ${top.quantidade} registros, somando ${formatMinutes(top.minutos)}.`
+    };
+  }
+
+  if (wantsTurno && wantsMost) {
+    const top = turnoRank[0];
+    return {
+      title: 'Turno com mais paradas',
+      content: `O turno ${top.label} lidera com ${top.quantidade} registros e ${formatMinutes(top.minutos)} de parada acumulada.`
+    };
+  }
+
+  if (wantsTurma && wantsMost) {
+    const top = turmaRank[0];
+    return {
+      title: 'Turma com mais paradas',
+      content: `A turma ${top.label} teve ${top.quantidade} paradas, totalizando ${formatMinutes(top.minutos)}.`
+    };
+  }
+
+  if (wantsTotalTime) {
+    return {
+      title: 'Tempo total de parada',
+      content: `O tempo total acumulado nas paradas e ${formatMinutes(totalMinutos)}.`
+    };
+  }
+
+  if (wantsCount) {
+    return {
+      title: 'Quantidade de paradas',
+      content: `Foram registradas ${baseParadas.length} paradas no historico analisado.`
+    };
+  }
+
+  return {
+    title: 'Pergunta nao reconhecida',
+    content: 'Tente perguntar sobre painel, turno, turma, quantidade total ou tempo total de parada.'
+  };
+}
+
+function SessionBar({ email, isAdmin, onSignOut }) {
+  return (
+    <div className="session-bar">
+      <span>Sessao ativa: {email || 'Usuario autenticado'}</span>
+      <div className="session-actions">
+        {isAdmin && <LinkButton to="/admin-acessos">Liberacao de Acessos</LinkButton>}
+        {isAdmin && <LinkButton to="/admin-auditoria">Auditoria Admin</LinkButton>}
+        <button type="button" className="btn secundario" onClick={onSignOut}>Sair</button>
+      </div>
+    </div>
+  );
+}
+
+function formatAccessStatus(status) {
+  if (status === 'approved') {
+    return 'Liberado';
+  }
+
+  return 'Pendente';
+}
+
+function AdminAccessPage({ isAdmin }) {
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [infoMessage, setInfoMessage] = useState('');
+  const [draftAllowedPages, setDraftAllowedPages] = useState({});
+
+  function hydrateDraftPermissions(items) {
+    const nextDraft = {};
+
+    (Array.isArray(items) ? items : []).forEach((item) => {
+      nextDraft[item.user_id] = normalizeAllowedPages(item.allowed_pages);
+    });
+
+    setDraftAllowedPages(nextDraft);
+  }
+
+  async function loadRecords() {
+    setLoading(true);
+    setError('');
+
+    try {
+      const result = await fetchManagedUserAccesses();
+      setRecords(result);
+      hydrateDraftPermissions(result);
+    } catch (loadError) {
+      setError(loadError?.message || 'Nao foi possivel carregar os acessos.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setLoading(false);
+      setRecords([]);
+      setError('Acesso restrito ao administrador.');
+      return;
+    }
+
+    loadRecords();
+  }, [isAdmin]);
+
+  async function handleStatusChange(targetUserId, nextStatus) {
+    setLoading(true);
+    setError('');
+    setInfoMessage('');
+
+    try {
+      await updateUserAccessStatus(targetUserId, nextStatus, draftAllowedPages[targetUserId] || []);
+      await loadRecords();
+      setInfoMessage(nextStatus === 'approved' ? 'Usuario liberado com sucesso.' : 'Usuario retornou para pendente.');
+    } catch (updateError) {
+      setError(updateError?.message || 'Nao foi possivel atualizar o acesso.');
+      setLoading(false);
+    }
+  }
+
+  function togglePagePermission(targetUserId, pageKey, enabled) {
+    setDraftAllowedPages((current) => {
+      const previous = Array.isArray(current[targetUserId]) ? current[targetUserId] : [];
+      const nextSet = new Set(previous);
+
+      if (enabled) {
+        nextSet.add(pageKey);
+      } else {
+        nextSet.delete(pageKey);
+      }
+
+      return {
+        ...current,
+        [targetUserId]: [...nextSet]
+      };
+    });
+  }
+
+  async function handleSavePermissions(targetUserId) {
+    setLoading(true);
+    setError('');
+    setInfoMessage('');
+
+    try {
+      const pages = draftAllowedPages[targetUserId] || [];
+      await updateUserAccessPermissions(targetUserId, pages);
+      await loadRecords();
+      setInfoMessage('Paginas liberadas atualizadas com sucesso.');
+    } catch (updateError) {
+      setError(updateError?.message || 'Nao foi possivel salvar as paginas liberadas.');
+      setLoading(false);
+    }
+  }
+
+  async function handleDeleteAccess(targetUserId, email) {
+    const confirmacao = window.confirm(`Deseja excluir o cadastro de acesso de ${email || targetUserId}?`);
+
+    if (!confirmacao) {
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setInfoMessage('');
+
+    try {
+      const removed = await deleteUserAccess(targetUserId);
+
+      if (removed) {
+        await loadRecords();
+        setInfoMessage('Cadastro de acesso excluido com sucesso.');
+      } else {
+        setInfoMessage('Nenhum cadastro foi removido.');
+        setLoading(false);
+      }
+    } catch (deleteError) {
+      setError(deleteError?.message || 'Nao foi possivel excluir o cadastro de acesso.');
+      setLoading(false);
+    }
+  }
+
+  const pendingRecords = records.filter((item) => item.status !== 'approved');
+  const approvedRecords = records.filter((item) => item.status === 'approved');
+
+  return (
+    <main className="page-shell">
+      <Header title="Liberacao de Acessos" />
+
+      <div className="page-actions">
+        <LinkButton to="/">Voltar ao painel</LinkButton>
+        <LinkButton to="/admin-auditoria">Abrir auditoria</LinkButton>
+        <button type="button" className="btn secundario" onClick={loadRecords} disabled={loading || !isAdmin}>
+          Atualizar
+        </button>
+      </div>
+
+      {loading && <div className="alert alert-info">Carregando usuarios cadastrados...</div>}
+      {error && <div className="alert alert-danger">{error}</div>}
+      {infoMessage && <div className="alert alert-success">{infoMessage}</div>}
+
+      {!loading && !error && (
+        <>
+          <section className="summary-cards">
+            <article className="card">
+              <span>Pendentes</span>
+              <strong>{pendingRecords.length}</strong>
+            </article>
+            <article className="card">
+              <span>Liberados</span>
+              <strong>{approvedRecords.length}</strong>
+            </article>
+          </section>
+
+          <table>
+            <thead>
+              <tr>
+                <th>E-mail</th>
+                <th>Status</th>
+                <th>Cadastro</th>
+                <th>Liberado em</th>
+                <th>Paginas liberadas</th>
+                <th>Acoes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {records.map((item) => {
+                const isApproved = item.status === 'approved';
+                const selectedPages = normalizeAllowedPages(draftAllowedPages[item.user_id] || []);
+
+                return (
+                  <tr key={item.user_id}>
+                    <td data-label="E-mail">{item.email || item.user_id}</td>
+                    <td data-label="Status">{formatAccessStatus(item.status)}</td>
+                    <td data-label="Cadastro">{item.created_at ? formatDateTime(new Date(item.created_at)) : '-'}</td>
+                    <td data-label="Liberado em">{item.approved_at ? formatDateTime(new Date(item.approved_at)) : '-'}</td>
+                    <td data-label="Paginas liberadas">
+                      <div className="access-pages-grid">
+                        {PAGE_ACCESS_OPTIONS.map((page) => {
+                          const checked = selectedPages.includes(page.key);
+
+                          return (
+                            <label key={`${item.user_id}-${page.key}`} className="checkbox-inline">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(event) => togglePagePermission(item.user_id, page.key, event.target.checked)}
+                                disabled={loading || !isAdmin}
+                              />
+                              <span>{page.label}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </td>
+                    <td data-label="Acoes">
+                      <div className="table-actions">
+                        <button
+                          type="button"
+                          className="btn secundario"
+                          onClick={() => handleStatusChange(item.user_id, 'approved')}
+                          disabled={loading || isApproved}
+                        >
+                          Liberar
+                        </button>
+                        <button
+                          type="button"
+                          className="btn excluir"
+                          onClick={() => handleStatusChange(item.user_id, 'pending')}
+                          disabled={loading || !isApproved}
+                        >
+                          Voltar para pendente
+                        </button>
+                        <button
+                          type="button"
+                          className="btn secundario"
+                          onClick={() => handleSavePermissions(item.user_id)}
+                          disabled={loading || !isAdmin}
+                        >
+                          Salvar paginas
+                        </button>
+                        <button
+                          type="button"
+                          className="btn perigo"
+                          onClick={() => handleDeleteAccess(item.user_id, item.email)}
+                          disabled={loading || !isAdmin}
+                        >
+                          Excluir cadastro
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+
+          {records.length === 0 && <div className="empty-state">Nenhum usuario solicitou acesso ainda.</div>}
+        </>
+      )}
+
+      <PageFooter />
+    </main>
+  );
+}
+
+function AdminAuditoriaPage({ isAdmin }) {
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [infoMessage, setInfoMessage] = useState('');
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadLogs() {
+      setLoading(true);
+      setError('');
+
+      try {
+        const result = await fetchAuditLogs(300);
+
+        if (!active) {
+          return;
+        }
+
+        setLogs(result);
+        await writeAuditLog('admin_visualizou_auditoria', {
+          totalRegistrosVisiveis: Array.isArray(result) ? result.length : 0
+        });
+      } catch (loadError) {
+        if (active) {
+          setError(loadError?.message || 'Nao foi possivel carregar os logs de auditoria.');
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    if (isAdmin) {
+      loadLogs();
+    } else {
+      setLoading(false);
+      setLogs([]);
+      setError('Acesso restrito ao administrador.');
+    }
+
+    return () => {
+      active = false;
+    };
+  }, [isAdmin]);
+
+  async function recarregarLogs() {
+    setLoading(true);
+    setError('');
+    setInfoMessage('');
+
+    try {
+      const result = await fetchAuditLogs(300);
+      setLogs(result);
+    } catch (loadError) {
+      setError(loadError?.message || 'Nao foi possivel atualizar os logs.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function limparAcessos() {
+    const confirmacao = window.confirm('Deseja realmente limpar os registros de acesso (login/logout)?');
+
+    if (!confirmacao) {
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setInfoMessage('');
+
+    try {
+      const removidos = await clearAccessAuditLogs();
+      const result = await fetchAuditLogs(300);
+      setLogs(result);
+      setInfoMessage(`Registros de acesso removidos: ${removidos}.`);
+    } catch (loadError) {
+      setError(loadError?.message || 'Nao foi possivel limpar os acessos.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function limparTudo() {
+    const confirmacao1 = window.confirm('Esta acao vai limpar todos os registros da Auditoria Administrativa. Deseja continuar?');
+
+    if (!confirmacao1) {
+      return;
+    }
+
+    const confirmacao2 = window.confirm('Confirmacao final: todos os logs da auditoria serao apagados.');
+
+    if (!confirmacao2) {
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setInfoMessage('');
+
+    try {
+      const removidos = await clearAllAuditLogs();
+      setLogs([]);
+      setInfoMessage(`Limpeza da auditoria concluida. Registros removidos: ${removidos}.`);
+    } catch (loadError) {
+      setError(loadError?.message || 'Nao foi possivel limpar os registros da auditoria.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main className="page-shell">
+      <Header title="Auditoria Administrativa" />
+
+      <div className="page-actions">
+        <LinkButton to="/">Voltar ao painel</LinkButton>
+        <button type="button" className="btn secundario" onClick={recarregarLogs} disabled={loading || !isAdmin}>
+          Atualizar
+        </button>
+        <button type="button" className="btn perigo" onClick={limparAcessos} disabled={loading || !isAdmin}>
+          Limpar acessos
+        </button>
+        <button type="button" className="btn perigo" onClick={limparTudo} disabled={loading || !isAdmin}>
+          Limpar auditoria
+        </button>
+      </div>
+
+      {loading && <div className="alert alert-info">Carregando logs de auditoria...</div>}
+      {error && <div className="alert alert-danger">{error}</div>}
+      {infoMessage && <div className="alert alert-success">{infoMessage}</div>}
+
+      {!loading && !error && (
+        <>
+          <section className="summary-cards">
+            <article className="card">
+              <span>Total de eventos</span>
+              <strong>{logs.length}</strong>
+            </article>
+          </section>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Data/Hora</th>
+                <th>Usuario</th>
+                <th>Acao</th>
+                <th>Detalhes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map((item) => (
+                <tr key={item.id}>
+                  <td data-label="Data/Hora">{item.created_at ? formatDateTime(new Date(item.created_at)) : '-'}</td>
+                  <td data-label="Usuario">{item.actor_email || item.actor_id || '-'}</td>
+                  <td data-label="Acao">{item.action || '-'}</td>
+                  <td data-label="Detalhes" className="audit-details-cell">
+                    <pre>{JSON.stringify(item.details || {}, null, 2)}</pre>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {logs.length === 0 && <div className="empty-state">Nenhum evento de auditoria registrado.</div>}
+        </>
+      )}
+
+      <PageFooter />
+    </main>
+  );
+}
+
+function AuthUnavailablePage({ missingEnvVars }) {
+  return (
+    <main className="page-shell auth-shell">
+      <Header title="Configuracao de seguranca pendente" />
+      <div className="auth-card">
+        <p>
+          Para proteger o sistema com login e senha, configure as variaveis do Supabase no ambiente.
+        </p>
+        <ul>
+          {missingEnvVars.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+        <p>
+          Assim que elas estiverem definidas, recarregue a pagina para habilitar a autenticacao.
+        </p>
+      </div>
+    </main>
+  );
+}
+
+function AuthPage() {
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setError('');
+    setMessage('');
+
+    const safeEmail = email.trim();
+
+    if (!safeEmail || !password) {
+      setError('Preencha e-mail e senha.');
+      return;
+    }
+
+    if (password.length < 8) {
+      setError('Use uma senha com no minimo 8 caracteres.');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      if (isSignUp) {
+        const result = await signUpWithPassword(safeEmail, password);
+
+        if (result?.session) {
+          setMessage('Conta criada e login realizado com sucesso.');
+        } else {
+          setMessage('Conta criada. Verifique seu e-mail para confirmar o acesso.');
+        }
+      } else {
+        await signInWithPassword(safeEmail, password);
+      }
+    } catch (authError) {
+      setError(authError?.message || 'Nao foi possivel autenticar.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main className="page-shell auth-shell">
+      <Header title="Acesso Seguro" />
+
+      <section className="auth-card">
+        <h2>{isSignUp ? 'Criar conta' : 'Entrar no sistema'}</h2>
+        <p className="auth-subtitle">
+          Acesso restrito por e-mail e senha para proteger os dados de manutencao.
+        </p>
+
+        <form className="auth-form" onSubmit={handleSubmit}>
+          <div className="form-field auth-field">
+            <label htmlFor="auth-email">E-mail</label>
+            <input
+              id="auth-email"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="seuemail@empresa.com"
+              required
+            />
+          </div>
+
+          <div className="form-field auth-field">
+            <label htmlFor="auth-password">Senha</label>
+            <input
+              id="auth-password"
+              type="password"
+              autoComplete={isSignUp ? 'new-password' : 'current-password'}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Minimo 8 caracteres"
+              required
+            />
+          </div>
+
+          {error && <div className="alert alert-danger">{error}</div>}
+          {message && <div className="alert alert-success">{message}</div>}
+
+          <div className="form-actions auth-actions">
+            <button type="submit" disabled={loading}>
+              {loading ? 'Aguarde...' : isSignUp ? 'Criar conta' : 'Entrar'}
+            </button>
+            <button
+              type="button"
+              className="btn secundario"
+              onClick={() => {
+                setIsSignUp((value) => !value);
+                setError('');
+                setMessage('');
+              }}
+              disabled={loading}
+            >
+              {isSignUp ? 'Ja tenho conta' : 'Criar nova conta'}
+            </button>
+          </div>
+        </form>
+      </section>
+    </main>
+  );
+}
+
+function AccessPendingPage({ email, status, onRefreshStatus, onSignOut }) {
+  const isApproved = status === 'approved';
+
+  if (isApproved) {
+    return null;
+  }
+
+  return (
+    <main className="page-shell auth-shell">
+      <Header title="Aguardando liberacao" />
+
+      <section className="auth-card">
+        <h2>Acesso pendente de aprovacao</h2>
+        <p className="auth-subtitle">
+          A conta {email || 'informada'} foi criada com sucesso, mas o administrador ainda precisa liberar o acesso as paginas do sistema.
+        </p>
+        <div className="alert alert-info">
+          Assim que o administrador aprovar, basta entrar novamente para acessar o painel.
+        </div>
+
+        <div className="form-actions auth-actions">
+          <button type="button" onClick={onRefreshStatus}>Verificar liberacao</button>
+          <button type="button" className="btn secundario" onClick={onSignOut}>Sair</button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function AccessDeniedPage({ pageKey, allowedPageKeys }) {
+  const allowedList = PAGE_ACCESS_OPTIONS.filter((item) => allowedPageKeys.includes(item.key));
+
+  return (
+    <main className="page-shell auth-shell">
+      <Header title="Acesso restrito" />
+
+      <section className="auth-card">
+        <h2>Pagina sem liberacao</h2>
+        <p className="auth-subtitle">
+          Seu perfil nao possui permissao para acessar: <strong>{getPageLabelByKey(pageKey)}</strong>.
+        </p>
+        {allowedList.length > 0 ? (
+          <>
+            <div className="alert alert-info">Paginas disponiveis para seu perfil:</div>
+            <div className="page-actions">
+              {allowedList.map((item) => (
+                <LinkButton key={item.key} to={item.path}>{item.label}</LinkButton>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="alert alert-info">
+            Nenhuma pagina operacional foi liberada ainda. Solicite ajuste ao administrador.
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
 
 function LinkButton({ to, children }) {
   return (
@@ -31,7 +826,7 @@ function PageFooter() {
   return <footer className="page-footer">Criado por: Jackson A. Silva</footer>;
 }
 
-function DashboardPage() {
+function DashboardPage({ pagePermissions }) {
   const [equipamentos, setEquipamentos] = useState([]);
   const [historicoParadas, setHistoricoParadas] = useState([]);
   const [editandoIndex, setEditandoIndex] = useState(null);
@@ -186,10 +981,11 @@ function DashboardPage() {
       <Header title="Status - Mina Manutencao" />
 
       <div className="top-actions">
-        <LinkButton to="/historico">Ver Gestao de Parada da Manutencao</LinkButton>
-        <LinkButton to="/relatorio-turnos">Relatorio por Turno</LinkButton>
-        <LinkButton to="/historico-opcoes">Historico por Opcao</LinkButton>
-        <LinkButton to="/dashboard-turnos">Dashboard por Turno</LinkButton>
+        {pagePermissions.historico && <LinkButton to="/historico">Ver Gestao de Parada da Manutencao</LinkButton>}
+        {pagePermissions['relatorio-turnos'] && <LinkButton to="/relatorio-turnos">Relatorio por Turno</LinkButton>}
+        {pagePermissions['historico-opcoes'] && <LinkButton to="/historico-opcoes">Historico por Opcao</LinkButton>}
+        {pagePermissions['dashboard-turnos'] && <LinkButton to="/dashboard-turnos">Dashboard por Turno</LinkButton>}
+        {pagePermissions['agente-ia'] && <LinkButton to="/agente-ia">Agente IA</LinkButton>}
         {equipamentos.some((e) => e.status === 'parado') && (
           <button type="button" className="btn excluir" onClick={limparStatusParado}>Limpar Status Parado</button>
         )}
@@ -1123,14 +1919,311 @@ function RelatorioPorTurnoPage() {
   );
 }
 
-export default function App() {
+function AgenteIAPage() {
+  const [historicoParadas, setHistoricoParadas] = useState([]);
+  const [pergunta, setPergunta] = useState('');
+  const [resposta, setResposta] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadHistorico() {
+      const state = await getState();
+      if (!active) {
+        return;
+      }
+
+      setHistoricoParadas(Array.isArray(state.historicoParadas) ? state.historicoParadas : []);
+    }
+
+    loadHistorico();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const baseParadas = useMemo(() => toParadaBase(historicoParadas), [historicoParadas]);
+
+  const rankingPaineis = useMemo(() => {
+    return groupParadasBy(baseParadas, 'nome').slice(0, 5);
+  }, [baseParadas]);
+
+  const totalMinutos = useMemo(() => {
+    return baseParadas.reduce((total, item) => total + getDurationInMinutes(item), 0);
+  }, [baseParadas]);
+
+  function enviarPergunta(event) {
+    event.preventDefault();
+    setResposta(buildAgentReply(pergunta, historicoParadas));
+  }
+
+  function usarSugestao(texto) {
+    setPergunta(texto);
+    setResposta(buildAgentReply(texto, historicoParadas));
+  }
+
   return (
-    <Routes>
-      <Route path="/" element={<DashboardPage />} />
-      <Route path="/historico" element={<HistoricoPage />} />
-      <Route path="/relatorio-turnos" element={<RelatorioPorTurnoPage />} />
-      <Route path="/historico-opcoes" element={<HistoricoOpcoesPage />} />
-      <Route path="/dashboard-turnos" element={<DashboardTurnosPage />} />
-    </Routes>
+    <main className="page-shell">
+      <Header title="Agente IA - Perguntas Rapidas" />
+
+      <div className="page-actions">
+        <LinkButton to="/">Voltar ao painel</LinkButton>
+      </div>
+
+      <section className="summary-cards">
+        <article className="card">
+          <span>Paradas analisadas</span>
+          <strong>{baseParadas.length}</strong>
+        </article>
+        <article className="card">
+          <span>Tempo total de parada</span>
+          <strong>{formatMinutes(totalMinutos)}</strong>
+        </article>
+      </section>
+
+      <section className="card ai-agent-box">
+        <h2>Faca sua pergunta</h2>
+        <form className="ai-agent-form" onSubmit={enviarPergunta}>
+          <div className="form-field form-field-wide">
+            <label htmlFor="perguntaIa">Pergunta</label>
+            <textarea
+              id="perguntaIa"
+              rows="3"
+              placeholder="Ex.: qual painel teve mais parada?"
+              value={pergunta}
+              onChange={(event) => setPergunta(event.target.value)}
+            />
+          </div>
+          <div className="form-actions">
+            <button type="submit">Perguntar ao agente</button>
+          </div>
+        </form>
+
+        <div className="ai-agent-suggestions" aria-label="Sugestoes de perguntas">
+          <button type="button" className="btn secundario" onClick={() => usarSugestao('qual painel teve mais parada?')}>Qual painel teve mais parada?</button>
+          <button type="button" className="btn secundario" onClick={() => usarSugestao('qual turno teve mais parada?')}>Qual turno teve mais parada?</button>
+          <button type="button" className="btn secundario" onClick={() => usarSugestao('qual turma teve mais parada?')}>Qual turma teve mais parada?</button>
+          <button type="button" className="btn secundario" onClick={() => usarSugestao('qual o tempo total de parada?')}>Qual o tempo total de parada?</button>
+        </div>
+
+        {resposta && (
+          <article className="ai-answer-card">
+            <h3>{resposta.title}</h3>
+            <p>{resposta.content}</p>
+          </article>
+        )}
+      </section>
+
+      <h2>Ranking de paineis com mais paradas</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Painel</th>
+            <th>Total de paradas</th>
+            <th>Tempo acumulado</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rankingPaineis.map((item) => (
+            <tr key={item.label}>
+              <td data-label="Painel">{item.label}</td>
+              <td data-label="Total de paradas">{item.quantidade}</td>
+              <td data-label="Tempo acumulado">{formatMinutes(item.minutos)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {rankingPaineis.length === 0 && <div className="empty-state">Nenhuma parada registrada para analise.</div>}
+
+      <PageFooter />
+    </main>
+  );
+}
+
+export default function App() {
+  const storageStatus = useMemo(() => getStorageStatus(), []);
+  const [authLoading, setAuthLoading] = useState(storageStatus.authEnabled);
+  const [session, setSession] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [accessProfile, setAccessProfile] = useState(null);
+  const [accessVersion, setAccessVersion] = useState(0);
+
+  useEffect(() => {
+    if (!storageStatus.authEnabled) {
+      setAuthLoading(false);
+      return () => {};
+    }
+
+    let active = true;
+
+    async function refreshAuthorization(nextSession) {
+      if (!nextSession) {
+        if (active) {
+          setIsAdmin(false);
+          setAccessProfile(null);
+        }
+        return;
+      }
+
+      try {
+        const admin = await getIsCurrentUserAdmin();
+
+        if (admin) {
+          if (active) {
+            setIsAdmin(true);
+            setAccessProfile({
+              status: 'approved',
+              allowed_pages: [...PAGE_ACCESS_KEYS]
+            });
+          }
+          return;
+        }
+
+        const access = await getCurrentUserAccessProfile();
+
+        if (active) {
+          setIsAdmin(false);
+          setAccessProfile(access);
+        }
+      } catch {
+        if (active) {
+          setIsAdmin(false);
+          setAccessProfile({
+            status: 'pending',
+            allowed_pages: []
+          });
+        }
+      }
+    }
+
+    async function applySession(nextSession) {
+      if (!active) {
+        return;
+      }
+
+      setSession(nextSession);
+
+      if (!nextSession) {
+        setIsAdmin(false);
+        setAccessProfile(null);
+        setAuthLoading(false);
+        return;
+      }
+
+      setAuthLoading(true);
+
+      try {
+        await refreshAuthorization(nextSession);
+      } finally {
+        if (active) {
+          setAuthLoading(false);
+        }
+      }
+    }
+
+    async function initSession() {
+      try {
+        const currentSession = await getCurrentSession();
+
+        await applySession(currentSession);
+      } catch {
+        if (active) {
+          setSession(null);
+          setIsAdmin(false);
+          setAccessProfile(null);
+        }
+      } finally {
+        if (active) {
+          setAuthLoading(false);
+        }
+      }
+    }
+
+    initSession();
+
+    const unsubscribe = subscribeAuthChanges((nextSession) => {
+      applySession(nextSession);
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [accessVersion, storageStatus.authEnabled]);
+
+  async function handleSignOut() {
+    await signOut();
+    setSession(null);
+    setIsAdmin(false);
+    setAccessProfile(null);
+  }
+
+  function handleRefreshAccess() {
+    setAuthLoading(true);
+    setAccessVersion((value) => value + 1);
+  }
+
+  if (authLoading) {
+    return (
+      <main className="page-shell auth-shell">
+        <Header title="Validando acesso" />
+        <div className="auth-card">
+          <p>Carregando sessao de seguranca...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (!storageStatus.authEnabled) {
+    return <AuthUnavailablePage missingEnvVars={storageStatus.missingEnvVars} />;
+  }
+
+  if (!session) {
+    return <AuthPage />;
+  }
+
+  if (!isAdmin && accessProfile?.status !== 'approved') {
+    return (
+      <AccessPendingPage
+        email={session?.user?.email}
+        status={accessProfile?.status}
+        onRefreshStatus={handleRefreshAccess}
+        onSignOut={handleSignOut}
+      />
+    );
+  }
+
+  const allowedPages = isAdmin
+    ? [...PAGE_ACCESS_KEYS]
+    : normalizeAllowedPages(accessProfile?.allowed_pages || []);
+  const pagePermissions = PAGE_ACCESS_KEYS.reduce((acc, key) => {
+    acc[key] = isAdmin || allowedPages.includes(key);
+    return acc;
+  }, {});
+
+  function renderProtectedPage(pageKey, element) {
+    if (isAdmin || pagePermissions[pageKey]) {
+      return element;
+    }
+
+    return <AccessDeniedPage pageKey={pageKey} allowedPageKeys={allowedPages} />;
+  }
+
+  return (
+    <>
+      <SessionBar email={session?.user?.email} isAdmin={isAdmin} onSignOut={handleSignOut} />
+      <Routes>
+        <Route path="/" element={renderProtectedPage('dashboard', <DashboardPage pagePermissions={pagePermissions} />)} />
+        <Route path="/historico" element={renderProtectedPage('historico', <HistoricoPage />)} />
+        <Route path="/relatorio-turnos" element={renderProtectedPage('relatorio-turnos', <RelatorioPorTurnoPage />)} />
+        <Route path="/historico-opcoes" element={renderProtectedPage('historico-opcoes', <HistoricoOpcoesPage />)} />
+        <Route path="/dashboard-turnos" element={renderProtectedPage('dashboard-turnos', <DashboardTurnosPage />)} />
+        <Route path="/agente-ia" element={renderProtectedPage('agente-ia', <AgenteIAPage />)} />
+        <Route path="/admin-acessos" element={<AdminAccessPage isAdmin={isAdmin} />} />
+        <Route path="/admin-auditoria" element={<AdminAuditoriaPage isAdmin={isAdmin} />} />
+      </Routes>
+    </>
   );
 }
