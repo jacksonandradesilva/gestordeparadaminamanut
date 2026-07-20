@@ -7,6 +7,8 @@ import {
   clearAccessAuditLogs,
   clearAllAuditLogs,
   deleteUserAccess,
+  getCadastrosBase,
+  getRelatorioEquipeEletrica,
   PAGE_ACCESS_KEYS,
   fetchAuditLogs,
   fetchManagedUserAccesses,
@@ -16,6 +18,8 @@ import {
   getRelatorioTurnosNotas,
   getState,
   getStorageStatus,
+  saveCadastrosBase,
+  saveRelatorioEquipeEletrica,
   saveHistoricoParadas,
   saveRelatorioTurnosNotas,
   saveState,
@@ -36,6 +40,7 @@ const PAGE_ACCESS_OPTIONS = [
   { key: 'dashboard', label: 'Painel principal', path: '/' },
   { key: 'historico', label: 'Gestao de parada', path: '/historico' },
   { key: 'relatorio-turnos', label: 'Relatorio por turno', path: '/relatorio-turnos' },
+  { key: 'relatorio-equipe-eletrica', label: 'Relatorio equipe eletrica', path: '/relatorio-equipe-eletrica' },
   { key: 'historico-opcoes', label: 'Historico por opcao', path: '/historico-opcoes' },
   { key: 'dashboard-turnos', label: 'Dashboard por turno', path: '/dashboard-turnos' },
   { key: 'agente-ia', label: 'Agente IA', path: '/agente-ia' }
@@ -840,6 +845,229 @@ function PageFooter() {
   return <footer className="page-footer">Criado por: Jackson A. Silva</footer>;
 }
 
+function getEmptyCadastrosBase() {
+  return {
+    colaboradores: [],
+    lideresTecnicos: [],
+    ferramentas: [],
+    veiculos: []
+  };
+}
+
+function CadastrosBasePage() {
+  const [cadastros, setCadastros] = useState(getEmptyCadastrosBase());
+  const [novoColaborador, setNovoColaborador] = useState('');
+  const [novoLiderTecnico, setNovoLiderTecnico] = useState('');
+  const [novaFerramenta, setNovaFerramenta] = useState('');
+  const [novoVeiculo, setNovoVeiculo] = useState('');
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadCadastros() {
+      const data = await getCadastrosBase();
+
+      if (!active) {
+        return;
+      }
+
+      setCadastros(data);
+    }
+
+    loadCadastros();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function persist(next) {
+    const saved = await saveCadastrosBase(next);
+    setCadastros(saved);
+  }
+
+  async function addItem(field, value, reset) {
+    const safeValue = String(value || '').trim();
+
+    if (!safeValue) {
+      return;
+    }
+
+    if (cadastros[field].some((item) => normalizeText(item) === normalizeText(safeValue))) {
+      window.alert('Item ja cadastrado nessa lista.');
+      return;
+    }
+
+    const next = {
+      ...cadastros,
+      [field]: [...cadastros[field], safeValue]
+    };
+
+    await persist(next);
+    reset('');
+  }
+
+  async function removeItem(field, value) {
+    const next = {
+      ...cadastros,
+      [field]: cadastros[field].filter((item) => item !== value)
+    };
+
+    await persist(next);
+  }
+
+  return (
+    <main className="page-shell">
+      <Header title="Cadastros Base - Relatorio Eletrico" />
+
+      <div className="page-actions">
+        <LinkButton to="/relatorio-equipe-eletrica">Voltar ao Relatorio Equipe Eletrica</LinkButton>
+      </div>
+
+      <section className="summary-cards">
+        <article className="card">
+          <span>Colaboradores</span>
+          <strong>{cadastros.colaboradores.length}</strong>
+        </article>
+        <article className="card">
+          <span>Lideres Tecnicos</span>
+          <strong>{cadastros.lideresTecnicos.length}</strong>
+        </article>
+        <article className="card">
+          <span>Ferramentas</span>
+          <strong>{cadastros.ferramentas.length}</strong>
+        </article>
+        <article className="card">
+          <span>Veiculos</span>
+          <strong>{cadastros.veiculos.length}</strong>
+        </article>
+      </section>
+
+      <section className="summary-cards">
+        <article className="card">
+          <h2>Colaboradores</h2>
+          <form className="ai-agent-form" onSubmit={(event) => {
+            event.preventDefault();
+            addItem('colaboradores', novoColaborador, setNovoColaborador);
+          }}>
+            <div className="form-field">
+              <label>Nome</label>
+              <input value={novoColaborador} onChange={(event) => setNovoColaborador(event.target.value)} />
+            </div>
+            <div className="form-actions">
+              <button type="submit">Adicionar</button>
+            </div>
+          </form>
+          <table>
+            <tbody>
+              {cadastros.colaboradores.map((item) => (
+                <tr key={item}>
+                  <td data-label="Colaborador">{item}</td>
+                  <td data-label="Acoes">
+                    <button type="button" className="btn excluir" onClick={() => removeItem('colaboradores', item)}>Excluir</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {cadastros.colaboradores.length === 0 && <div className="empty-state">Nenhum colaborador cadastrado.</div>}
+        </article>
+
+        <article className="card">
+          <h2>Lider Tecnico</h2>
+          <form className="ai-agent-form" onSubmit={(event) => {
+            event.preventDefault();
+            addItem('lideresTecnicos', novoLiderTecnico, setNovoLiderTecnico);
+          }}>
+            <div className="form-field">
+              <label>Nome</label>
+              <input value={novoLiderTecnico} onChange={(event) => setNovoLiderTecnico(event.target.value)} />
+            </div>
+            <div className="form-actions">
+              <button type="submit">Adicionar</button>
+            </div>
+          </form>
+          <table>
+            <tbody>
+              {cadastros.lideresTecnicos.map((item) => (
+                <tr key={item}>
+                  <td data-label="Lider Tecnico">{item}</td>
+                  <td data-label="Acoes">
+                    <button type="button" className="btn excluir" onClick={() => removeItem('lideresTecnicos', item)}>Excluir</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {cadastros.lideresTecnicos.length === 0 && <div className="empty-state">Nenhum lider tecnico cadastrado.</div>}
+        </article>
+      </section>
+
+      <section className="summary-cards">
+        <article className="card">
+          <h2>Ferramenta</h2>
+          <form className="ai-agent-form" onSubmit={(event) => {
+            event.preventDefault();
+            addItem('ferramentas', novaFerramenta, setNovaFerramenta);
+          }}>
+            <div className="form-field">
+              <label>Nome</label>
+              <input value={novaFerramenta} onChange={(event) => setNovaFerramenta(event.target.value)} />
+            </div>
+            <div className="form-actions">
+              <button type="submit">Adicionar</button>
+            </div>
+          </form>
+          <table>
+            <tbody>
+              {cadastros.ferramentas.map((item) => (
+                <tr key={item}>
+                  <td data-label="Ferramenta">{item}</td>
+                  <td data-label="Acoes">
+                    <button type="button" className="btn excluir" onClick={() => removeItem('ferramentas', item)}>Excluir</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {cadastros.ferramentas.length === 0 && <div className="empty-state">Nenhuma ferramenta cadastrada.</div>}
+        </article>
+
+        <article className="card">
+          <h2>Veiculos</h2>
+          <form className="ai-agent-form" onSubmit={(event) => {
+            event.preventDefault();
+            addItem('veiculos', novoVeiculo, setNovoVeiculo);
+          }}>
+            <div className="form-field">
+              <label>Nome</label>
+              <input value={novoVeiculo} onChange={(event) => setNovoVeiculo(event.target.value)} />
+            </div>
+            <div className="form-actions">
+              <button type="submit">Adicionar</button>
+            </div>
+          </form>
+          <table>
+            <tbody>
+              {cadastros.veiculos.map((item) => (
+                <tr key={item}>
+                  <td data-label="Veiculo">{item}</td>
+                  <td data-label="Acoes">
+                    <button type="button" className="btn excluir" onClick={() => removeItem('veiculos', item)}>Excluir</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {cadastros.veiculos.length === 0 && <div className="empty-state">Nenhum veiculo cadastrado.</div>}
+        </article>
+      </section>
+
+      <PageFooter />
+    </main>
+  );
+}
+
 function DashboardPage({ pagePermissions }) {
   const [equipamentos, setEquipamentos] = useState([]);
   const [historicoParadas, setHistoricoParadas] = useState([]);
@@ -997,6 +1225,7 @@ function DashboardPage({ pagePermissions }) {
       <div className="top-actions">
         {pagePermissions.historico && <LinkButton to="/historico">Ver Gestao de Parada da Manutencao</LinkButton>}
         {pagePermissions['relatorio-turnos'] && <LinkButton to="/relatorio-turnos">Relatorio por Turno</LinkButton>}
+        {pagePermissions['relatorio-equipe-eletrica'] && <LinkButton to="/relatorio-equipe-eletrica">Relatorio Equipe Eletrica</LinkButton>}
         {pagePermissions['historico-opcoes'] && <LinkButton to="/historico-opcoes">Historico por Opcao</LinkButton>}
         {pagePermissions['dashboard-turnos'] && <LinkButton to="/dashboard-turnos">Dashboard por Turno</LinkButton>}
         {pagePermissions['agente-ia'] && <LinkButton to="/agente-ia">Agente IA</LinkButton>}
@@ -1933,6 +2162,566 @@ function RelatorioPorTurnoPage() {
   );
 }
 
+function RelatorioEquipeEletricaPage() {
+  const [relatorios, setRelatorios] = useState([]);
+  const [colaboradoresCadastrados, setColaboradoresCadastrados] = useState([]);
+  const [lideresTecnicosCadastrados, setLideresTecnicosCadastrados] = useState([]);
+  const [ferramentasCadastradas, setFerramentasCadastradas] = useState([]);
+  const [veiculosCadastrados, setVeiculosCadastrados] = useState([]);
+  const [editId, setEditId] = useState(null);
+
+  function getEmptyDescricaoAtividade() {
+    return {
+      descricao: '',
+      equipamento: '',
+      tagEquipamento: '',
+      tipoServico: '',
+      ordemServico: ''
+    };
+  }
+
+  const [formData, setFormData] = useState({
+    dataRelatorio: '',
+    turno: '',
+    turma: '',
+    liderTecnico: '',
+    descricaoAtividades: [getEmptyDescricaoAtividade()],
+    executantes: [''],
+    ferramentas: [''],
+    veiculos: ['']
+  });
+
+  function normalizeExecutantesList(value) {
+    if (Array.isArray(value)) {
+      const cleaned = value
+        .map((item) => String(item || '').trim())
+        .filter(Boolean);
+
+      return cleaned.length > 0 ? [...new Set(cleaned)] : [''];
+    }
+
+    const fromText = String(value || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    return fromText.length > 0 ? [...new Set(fromText)] : [''];
+  }
+
+  function normalizeFerramentasList(value) {
+    if (Array.isArray(value)) {
+      const cleaned = value
+        .map((item) => String(item || '').trim())
+        .filter(Boolean);
+
+      return cleaned.length > 0 ? [...new Set(cleaned)] : [''];
+    }
+
+    const fromText = String(value || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    return fromText.length > 0 ? [...new Set(fromText)] : [''];
+  }
+
+  function normalizeVeiculosList(value) {
+    if (Array.isArray(value)) {
+      const cleaned = value
+        .map((item) => String(item || '').trim())
+        .filter(Boolean);
+
+      return cleaned.length > 0 ? [...new Set(cleaned)] : [''];
+    }
+
+    const fromText = String(value || '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    return fromText.length > 0 ? [...new Set(fromText)] : [''];
+  }
+
+  function normalizeDescricaoAtividadesList(value) {
+    function toSafeItem(item) {
+      if (item && typeof item === 'object' && !Array.isArray(item)) {
+        const descricao = String(item.descricao || item.texto || '').trim();
+        const equipamento = String(item.equipamento || '').trim();
+        const tagEquipamento = String(item.tagEquipamento || item.tag || '').trim();
+        const tipoServico = String(item.tipoServico || item.tipoDeServico || '').trim();
+        const ordemServico = String(item.ordemServico || item.os || '').trim();
+
+        return {
+          descricao,
+          equipamento,
+          tagEquipamento,
+          tipoServico,
+          ordemServico
+        };
+      }
+
+      return {
+        ...getEmptyDescricaoAtividade(),
+        descricao: String(item || '').trim()
+      };
+    }
+
+    if (Array.isArray(value)) {
+      const cleaned = value
+        .map((item) => toSafeItem(item))
+        .filter((item) => (
+          item.descricao
+          || item.equipamento
+          || item.tagEquipamento
+          || item.tipoServico
+          || item.ordemServico
+        ));
+
+      return cleaned.length > 0 ? cleaned : [getEmptyDescricaoAtividade()];
+    }
+
+    if (value && typeof value === 'object') {
+      const item = toSafeItem(value);
+      const hasAnyValue = item.descricao
+        || item.equipamento
+        || item.tagEquipamento
+        || item.tipoServico
+        || item.ordemServico;
+
+      return hasAnyValue ? [item] : [getEmptyDescricaoAtividade()];
+    }
+
+    const single = String(value || '').trim();
+    return single
+      ? [{ ...getEmptyDescricaoAtividade(), descricao: single }]
+      : [getEmptyDescricaoAtividade()];
+  }
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadRelatorios() {
+      const [data, cadastros] = await Promise.all([
+        getRelatorioEquipeEletrica(),
+        getCadastrosBase()
+      ]);
+
+      if (!active) {
+        return;
+      }
+
+      setRelatorios(Array.isArray(data) ? data : []);
+      setColaboradoresCadastrados(Array.isArray(cadastros?.colaboradores) ? cadastros.colaboradores : []);
+      setLideresTecnicosCadastrados(Array.isArray(cadastros?.lideresTecnicos) ? cadastros.lideresTecnicos : []);
+      setFerramentasCadastradas(Array.isArray(cadastros?.ferramentas) ? cadastros.ferramentas : []);
+      setVeiculosCadastrados(Array.isArray(cadastros?.veiculos) ? cadastros.veiculos : []);
+    }
+
+    loadRelatorios();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  function resetForm() {
+    setEditId(null);
+    setFormData({
+      dataRelatorio: '',
+      turno: '',
+      turma: '',
+      liderTecnico: '',
+      descricaoAtividades: [getEmptyDescricaoAtividade()],
+      executantes: [''],
+      ferramentas: [''],
+      veiculos: ['']
+    });
+  }
+
+  function updateDescricaoAtividade(index, field, value) {
+    setFormData((current) => ({
+      ...current,
+      descricaoAtividades: current.descricaoAtividades.map((item, currentIndex) => (
+        currentIndex === index ? { ...item, [field]: value } : item
+      ))
+    }));
+  }
+
+  function addDescricaoAtividadeField() {
+    setFormData((current) => ({
+      ...current,
+      descricaoAtividades: [...current.descricaoAtividades, getEmptyDescricaoAtividade()]
+    }));
+  }
+
+  function removeDescricaoAtividadeField(index) {
+    setFormData((current) => {
+      const next = current.descricaoAtividades.filter((_, currentIndex) => currentIndex !== index);
+
+      return {
+        ...current,
+        descricaoAtividades: next.length > 0 ? next : [getEmptyDescricaoAtividade()]
+      };
+    });
+  }
+
+  function updateExecutante(index, value) {
+    setFormData((current) => ({
+      ...current,
+      executantes: current.executantes.map((item, currentIndex) => (
+        currentIndex === index ? value : item
+      ))
+    }));
+  }
+
+  function addExecutanteField() {
+    setFormData((current) => ({
+      ...current,
+      executantes: [...current.executantes, '']
+    }));
+  }
+
+  function removeExecutanteField(index) {
+    setFormData((current) => {
+      const next = current.executantes.filter((_, currentIndex) => currentIndex !== index);
+
+      return {
+        ...current,
+        executantes: next.length > 0 ? next : ['']
+      };
+    });
+  }
+
+  function updateFerramenta(index, value) {
+    setFormData((current) => ({
+      ...current,
+      ferramentas: current.ferramentas.map((item, currentIndex) => (
+        currentIndex === index ? value : item
+      ))
+    }));
+  }
+
+  function addFerramentaField() {
+    setFormData((current) => ({
+      ...current,
+      ferramentas: [...current.ferramentas, '']
+    }));
+  }
+
+  function removeFerramentaField(index) {
+    setFormData((current) => {
+      const next = current.ferramentas.filter((_, currentIndex) => currentIndex !== index);
+
+      return {
+        ...current,
+        ferramentas: next.length > 0 ? next : ['']
+      };
+    });
+  }
+
+  function updateVeiculo(index, value) {
+    setFormData((current) => ({
+      ...current,
+      veiculos: current.veiculos.map((item, currentIndex) => (
+        currentIndex === index ? value : item
+      ))
+    }));
+  }
+
+  function addVeiculoField() {
+    setFormData((current) => ({
+      ...current,
+      veiculos: [...current.veiculos, '']
+    }));
+  }
+
+  function removeVeiculoField(index) {
+    setFormData((current) => {
+      const next = current.veiculos.filter((_, currentIndex) => currentIndex !== index);
+
+      return {
+        ...current,
+        veiculos: next.length > 0 ? next : ['']
+      };
+    });
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+
+    const descricaoAtividades = normalizeDescricaoAtividadesList(formData.descricaoAtividades);
+
+    const payload = {
+      id: editId ?? Date.now(),
+      dataRelatorio: formData.dataRelatorio,
+      turno: formData.turno,
+      turma: formData.turma,
+      liderTecnico: formData.liderTecnico.trim(),
+      descricaoAtividades,
+      descricaoAtividade: descricaoAtividades
+        .map((item) => item.descricao)
+        .filter(Boolean)
+        .join('\n'),
+      executantes: normalizeExecutantesList(formData.executantes),
+      ferramentas: normalizeFerramentasList(formData.ferramentas),
+      veiculos: normalizeVeiculosList(formData.veiculos)
+    };
+
+    const next = editId === null
+      ? [payload, ...relatorios]
+      : relatorios.map((item) => (item.id === editId ? { ...item, ...payload } : item));
+
+    setRelatorios(next);
+    await saveRelatorioEquipeEletrica(next);
+    resetForm();
+  }
+
+  function editarRelatorio(item) {
+    setEditId(item.id);
+    setFormData({
+      dataRelatorio: item.dataRelatorio || '',
+      turno: item.turno || '',
+      turma: item.turma || '',
+      liderTecnico: item.liderTecnico || '',
+      descricaoAtividades: normalizeDescricaoAtividadesList(
+        item.descricaoAtividades || item.descricaoAtividade
+      ),
+      executantes: normalizeExecutantesList(item.executantes),
+      ferramentas: normalizeFerramentasList(item.ferramentas),
+      veiculos: normalizeVeiculosList(item.veiculos)
+    });
+  }
+
+  async function excluirRelatorio(id) {
+    const next = relatorios.filter((item) => item.id !== id);
+    setRelatorios(next);
+    await saveRelatorioEquipeEletrica(next);
+  }
+
+  async function limparRelatorios() {
+    const confirmacao = window.confirm('Deseja realmente limpar todos os relatorios da equipe eletrica?');
+
+    if (!confirmacao) {
+      return;
+    }
+
+    setRelatorios([]);
+    await saveRelatorioEquipeEletrica([]);
+    resetForm();
+  }
+
+  return (
+    <main className="page-shell">
+      <Header title="Relatorio Equipe Eletrica" />
+
+      <div className="page-actions">
+        <LinkButton to="/">Voltar ao painel</LinkButton>
+        <LinkButton to="/cadastros-base">Ir para Cadastros Base</LinkButton>
+        <button type="button" className="btn perigo" onClick={limparRelatorios}>Limpar relatorios</button>
+      </div>
+
+      <form onSubmit={handleSubmit}>
+        <div className="form-field">
+          <label>Data do Relatorio</label>
+          <input
+            type="date"
+            value={formData.dataRelatorio}
+            onChange={(event) => setFormData({ ...formData, dataRelatorio: event.target.value })}
+          />
+        </div>
+        <div className="form-field form-field-wide">
+          <label>Turno</label>
+          <select
+            value={formData.turno}
+            onChange={(event) => setFormData({ ...formData, turno: event.target.value })}
+            required
+          >
+            <option value="" disabled>Selecione o turno</option>
+            <option value="A">A</option>
+            <option value="B">B</option>
+            <option value="C">C</option>
+            <option value="D">D</option>
+          </select>
+        </div>
+        <div className="form-field form-field-wide">
+          <label>Turma</label>
+          <select
+            value={formData.turma}
+            onChange={(event) => setFormData({ ...formData, turma: event.target.value })}
+            required
+          >
+            <option value="" disabled>Selecione a turma</option>
+            <option value="A">A</option>
+            <option value="B">B</option>
+            <option value="C">C</option>
+            <option value="D">D</option>
+            <option value="E">E</option>
+          </select>
+        </div>
+        <div className="form-field form-field-wide">
+          <label>Lider Tecnico</label>
+          <input
+            value={formData.liderTecnico}
+            onChange={(event) => setFormData({ ...formData, liderTecnico: event.target.value })}
+            placeholder="Nome do lider tecnico"
+            list="lideres-tecnicos-cadastrados-eletrica"
+          />
+          <datalist id="lideres-tecnicos-cadastrados-eletrica">
+            {lideresTecnicosCadastrados.map((item) => (
+              <option key={item} value={item} />
+            ))}
+          </datalist>
+        </div>
+        <div className="form-field compact-list-field">
+          <label>Executantes</label>
+          <div className="executantes-grid">
+            {formData.executantes.map((executante, index) => (
+              <div key={`executante-${index}`} className="executante-row compact-row">
+                <input
+                  value={executante}
+                  onChange={(event) => updateExecutante(index, event.target.value)}
+                  placeholder={`Executante ${index + 1}`}
+                  list="colaboradores-cadastrados-eletrica"
+                />
+                <button
+                  type="button"
+                  className="btn excluir"
+                  onClick={() => removeExecutanteField(index)}
+                >
+                  Remover
+                </button>
+              </div>
+            ))}
+            <datalist id="colaboradores-cadastrados-eletrica">
+              {colaboradoresCadastrados.map((item) => (
+                <option key={item} value={item} />
+              ))}
+            </datalist>
+          </div>
+          <div className="form-actions">
+            <button type="button" className="btn secundario" onClick={addExecutanteField}>Adicionar executante</button>
+          </div>
+        </div>
+        <div className="form-field compact-list-field">
+          <label>Ferramentas</label>
+          <div className="executantes-grid">
+            {formData.ferramentas.map((ferramenta, index) => (
+              <div key={`ferramenta-${index}`} className="executante-row compact-row">
+                <input
+                  value={ferramenta}
+                  onChange={(event) => updateFerramenta(index, event.target.value)}
+                  placeholder={`Ferramenta ${index + 1}`}
+                  list="ferramentas-cadastradas-eletrica"
+                />
+                <button
+                  type="button"
+                  className="btn excluir"
+                  onClick={() => removeFerramentaField(index)}
+                >
+                  Remover
+                </button>
+              </div>
+            ))}
+            <datalist id="ferramentas-cadastradas-eletrica">
+              {ferramentasCadastradas.map((item) => (
+                <option key={item} value={item} />
+              ))}
+            </datalist>
+          </div>
+          <div className="form-actions">
+            <button type="button" className="btn secundario" onClick={addFerramentaField}>Adicionar ferramenta</button>
+          </div>
+        </div>
+        <div className="form-field compact-list-field">
+          <label>Veiculos</label>
+          <div className="executantes-grid">
+            {formData.veiculos.map((veiculo, index) => (
+              <div key={`veiculo-${index}`} className="executante-row compact-row">
+                <input
+                  value={veiculo}
+                  onChange={(event) => updateVeiculo(index, event.target.value)}
+                  placeholder={`Veiculo ${index + 1}`}
+                  list="veiculos-cadastrados-eletrica"
+                />
+                <button
+                  type="button"
+                  className="btn excluir"
+                  onClick={() => removeVeiculoField(index)}
+                >
+                  Remover
+                </button>
+              </div>
+            ))}
+            <datalist id="veiculos-cadastrados-eletrica">
+              {veiculosCadastrados.map((item) => (
+                <option key={item} value={item} />
+              ))}
+            </datalist>
+          </div>
+          <div className="form-actions">
+            <button type="button" className="btn secundario" onClick={addVeiculoField}>Adicionar veiculo</button>
+          </div>
+        </div>
+        <div className="form-field descricao-atividade-field">
+          <label>Descricao da Atividade</label>
+          <div className="executantes-grid">
+            {formData.descricaoAtividades.map((descricao, index) => (
+              <div key={`descricao-atividade-${index}`} className="atividade-item">
+                <div className="atividade-meta-grid">
+                  <input
+                    value={descricao.equipamento}
+                    onChange={(event) => updateDescricaoAtividade(index, 'equipamento', event.target.value)}
+                    placeholder="Equipamento (opcional)"
+                  />
+                  <input
+                    value={descricao.tagEquipamento}
+                    onChange={(event) => updateDescricaoAtividade(index, 'tagEquipamento', event.target.value)}
+                    placeholder="Tag do Equipamento (opcional)"
+                  />
+                  <input
+                    value={descricao.tipoServico}
+                    onChange={(event) => updateDescricaoAtividade(index, 'tipoServico', event.target.value)}
+                    placeholder="Tipo de Servico (opcional)"
+                  />
+                  <input
+                    value={descricao.ordemServico}
+                    onChange={(event) => updateDescricaoAtividade(index, 'ordemServico', event.target.value)}
+                    placeholder="Ordem de Servico (opcional)"
+                  />
+                </div>
+                <div className="executante-row compact-row">
+                  <textarea
+                    value={descricao.descricao}
+                    onChange={(event) => updateDescricaoAtividade(index, 'descricao', event.target.value)}
+                    placeholder="Descreva a atividade realizada"
+                    rows={5}
+                  />
+                  <button
+                    type="button"
+                    className="btn excluir"
+                    onClick={() => removeDescricaoAtividadeField(index)}
+                  >
+                    Remover
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="form-actions">
+            <button type="button" className="btn secundario" onClick={addDescricaoAtividadeField}>Adicionar novo campo</button>
+          </div>
+        </div>
+        <div className="form-actions">
+          <button type="submit">{editId === null ? 'Salvar relatorio' : 'Salvar edicao'}</button>
+          <button type="button" className="btn secundario" onClick={resetForm}>Limpar formulario</button>
+        </div>
+      </form>
+
+      <PageFooter />
+    </main>
+  );
+}
+
 function AgenteIAPage() {
   const [historicoParadas, setHistoricoParadas] = useState([]);
   const [pergunta, setPergunta] = useState('');
@@ -2232,6 +3021,8 @@ export default function App() {
         <Route path="/" element={renderProtectedPage('dashboard', <DashboardPage pagePermissions={pagePermissions} />)} />
         <Route path="/historico" element={renderProtectedPage('historico', <HistoricoPage />)} />
         <Route path="/relatorio-turnos" element={renderProtectedPage('relatorio-turnos', <RelatorioPorTurnoPage />)} />
+        <Route path="/relatorio-equipe-eletrica" element={renderProtectedPage('relatorio-equipe-eletrica', <RelatorioEquipeEletricaPage />)} />
+        <Route path="/cadastros-base" element={renderProtectedPage('relatorio-equipe-eletrica', <CadastrosBasePage />)} />
         <Route path="/historico-opcoes" element={renderProtectedPage('historico-opcoes', <HistoricoOpcoesPage />)} />
         <Route path="/dashboard-turnos" element={renderProtectedPage('dashboard-turnos', <DashboardTurnosPage />)} />
         <Route path="/agente-ia" element={renderProtectedPage('agente-ia', <AgenteIAPage />)} />

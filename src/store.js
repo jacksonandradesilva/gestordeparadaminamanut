@@ -11,10 +11,14 @@ export const PAGE_ACCESS_KEYS = [
   'dashboard',
   'historico',
   'relatorio-turnos',
+  'relatorio-equipe-eletrica',
   'historico-opcoes',
   'dashboard-turnos',
   'agente-ia'
 ];
+
+const RELATORIO_EQUIPE_ELETRICA_KEY = '__relatorio_equipe_eletrica__';
+const CADASTROS_BASE_KEY = '__cadastros_base__';
 
 function sanitizeAllowedPages(allowedPages) {
   if (!Array.isArray(allowedPages)) {
@@ -580,6 +584,230 @@ function cloneRelatorioTurnosNotas(notas) {
 
   return { ...notas };
 }
+
+function getEmptyRelatorioEquipeEletrica() {
+  return [];
+}
+
+function cloneRelatorioEquipeEletrica(list) {
+  if (!Array.isArray(list)) {
+    return [];
+  }
+
+  function getEmptyDescricaoAtividade() {
+    return {
+      descricao: '',
+      equipamento: '',
+      tagEquipamento: '',
+      tipoServico: '',
+      ordemServico: ''
+    };
+  }
+
+  function normalizeTurno(value) {
+    const safe = String(value || '').trim().toUpperCase();
+    return ['A', 'B', 'C', 'D'].includes(safe) ? safe : '';
+  }
+
+  function normalizeTurma(value) {
+    const safe = String(value || '').trim().toUpperCase();
+    return ['A', 'B', 'C', 'D', 'E'].includes(safe) ? safe : '';
+  }
+
+  function normalizeExecutantesList(value) {
+    if (Array.isArray(value)) {
+      return [...new Set(
+        value
+          .map((item) => String(item || '').trim())
+          .filter(Boolean)
+      )];
+    }
+
+    return [...new Set(
+      String(value || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )];
+  }
+
+  function normalizeFerramentasList(value) {
+    if (Array.isArray(value)) {
+      return [...new Set(
+        value
+          .map((item) => String(item || '').trim())
+          .filter(Boolean)
+      )];
+    }
+
+    return [...new Set(
+      String(value || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )];
+  }
+
+  function normalizeVeiculosList(value) {
+    if (Array.isArray(value)) {
+      return [...new Set(
+        value
+          .map((item) => String(item || '').trim())
+          .filter(Boolean)
+      )];
+    }
+
+    return [...new Set(
+      String(value || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )];
+  }
+
+  function normalizeDescricaoAtividadesList(value) {
+    function toSafeItem(item) {
+      if (item && typeof item === 'object' && !Array.isArray(item)) {
+        return {
+          descricao: String(item.descricao || item.texto || '').trim(),
+          equipamento: String(item.equipamento || '').trim(),
+          tagEquipamento: String(item.tagEquipamento || item.tag || '').trim(),
+          tipoServico: String(item.tipoServico || item.tipoDeServico || '').trim(),
+          ordemServico: String(item.ordemServico || item.os || '').trim()
+        };
+      }
+
+      return {
+        ...getEmptyDescricaoAtividade(),
+        descricao: String(item || '').trim()
+      };
+    }
+
+    if (Array.isArray(value)) {
+      const cleaned = value
+        .map((item) => toSafeItem(item))
+        .filter((item) => (
+          item.descricao
+          || item.equipamento
+          || item.tagEquipamento
+          || item.tipoServico
+          || item.ordemServico
+        ));
+
+      return cleaned.length > 0 ? cleaned : [getEmptyDescricaoAtividade()];
+    }
+
+    if (value && typeof value === 'object') {
+      const item = toSafeItem(value);
+      const hasAnyValue = item.descricao
+        || item.equipamento
+        || item.tagEquipamento
+        || item.tipoServico
+        || item.ordemServico;
+
+      return hasAnyValue ? [item] : [getEmptyDescricaoAtividade()];
+    }
+
+    const single = String(value || '').trim();
+    return single
+      ? [{ ...getEmptyDescricaoAtividade(), descricao: single }]
+      : [getEmptyDescricaoAtividade()];
+  }
+
+  function normalizeDescricaoAtividade(value) {
+    return normalizeDescricaoAtividadesList(value)
+      .map((item) => item.descricao)
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  return list
+    .filter((item) => item && typeof item === 'object')
+    .map((item) => {
+      const descricaoAtividades = normalizeDescricaoAtividadesList(
+        item.descricaoAtividades || item.descricaoAtividade || item.atividades || ''
+      );
+
+      return {
+        id: Number(item.id) || Date.now(),
+        dataRelatorio: String(item.dataRelatorio || ''),
+        turno: normalizeTurno(item.turno),
+        turma: normalizeTurma(item.turma),
+        liderTecnico: String(item.liderTecnico || item.encarregado || '').trim(),
+        descricaoAtividades,
+        descricaoAtividade: normalizeDescricaoAtividade(descricaoAtividades),
+        executantes: normalizeExecutantesList(item.executantes || item.eletricistas || ''),
+        ferramentas: normalizeFerramentasList(item.ferramentas),
+        veiculos: normalizeVeiculosList(item.veiculos)
+      };
+    });
+}
+
+function getRelatorioEquipeEletricaFromNotas(notas) {
+  const safeNotas = cloneRelatorioTurnosNotas(notas);
+  const raw = safeNotas[RELATORIO_EQUIPE_ELETRICA_KEY];
+
+  if (!Array.isArray(raw)) {
+    return getEmptyRelatorioEquipeEletrica();
+  }
+
+  return cloneRelatorioEquipeEletrica(raw);
+}
+
+function mergeRelatorioEquipeEletricaIntoNotas(notas, relatorios) {
+  const safeNotas = cloneRelatorioTurnosNotas(notas);
+  safeNotas[RELATORIO_EQUIPE_ELETRICA_KEY] = cloneRelatorioEquipeEletrica(relatorios);
+  return safeNotas;
+}
+
+function getEmptyCadastrosBase() {
+  return {
+    colaboradores: [],
+    lideresTecnicos: [],
+    ferramentas: [],
+    veiculos: []
+  };
+}
+
+function normalizeCadastroList(list) {
+  if (!Array.isArray(list)) {
+    return [];
+  }
+
+  return [...new Set(
+    list
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+}
+
+function cloneCadastrosBase(cadastros) {
+  const base = cadastros && typeof cadastros === 'object' ? cadastros : {};
+
+  return {
+    colaboradores: normalizeCadastroList(base.colaboradores),
+    lideresTecnicos: normalizeCadastroList(base.lideresTecnicos),
+    ferramentas: normalizeCadastroList(base.ferramentas),
+    veiculos: normalizeCadastroList(base.veiculos)
+  };
+}
+
+function getCadastrosBaseFromNotas(notas) {
+  const safeNotas = cloneRelatorioTurnosNotas(notas);
+  const raw = safeNotas[CADASTROS_BASE_KEY];
+
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return getEmptyCadastrosBase();
+  }
+
+  return cloneCadastrosBase(raw);
+}
+
+function mergeCadastrosBaseIntoNotas(notas, cadastrosBase) {
+  const safeNotas = cloneRelatorioTurnosNotas(notas);
+  safeNotas[CADASTROS_BASE_KEY] = cloneCadastrosBase(cadastrosBase);
+  return safeNotas;
+}
 // Clona o estado para evitar mutações externas
 function cloneState(state) {
   return {
@@ -733,4 +961,53 @@ export async function saveRelatorioTurnosNotas(notas) {
   });
 
   return result;
+}
+
+export async function getRelatorioEquipeEletrica() {
+  const notas = await getRelatorioTurnosNotas();
+  return getRelatorioEquipeEletricaFromNotas(notas);
+}
+
+export async function saveRelatorioEquipeEletrica(relatorios) {
+  const current = await getState();
+  const safeRelatorios = cloneRelatorioEquipeEletrica(relatorios);
+
+  current.relatorioTurnosNotas = mergeRelatorioEquipeEletricaIntoNotas(
+    current.relatorioTurnosNotas,
+    safeRelatorios
+  );
+
+  await saveState(current);
+
+  await writeAuditLog('relatorio_equipe_eletrica_atualizado', {
+    totalRegistros: safeRelatorios.length
+  });
+
+  return safeRelatorios;
+}
+
+export async function getCadastrosBase() {
+  const notas = await getRelatorioTurnosNotas();
+  return getCadastrosBaseFromNotas(notas);
+}
+
+export async function saveCadastrosBase(cadastrosBase) {
+  const current = await getState();
+  const safeCadastros = cloneCadastrosBase(cadastrosBase);
+
+  current.relatorioTurnosNotas = mergeCadastrosBaseIntoNotas(
+    current.relatorioTurnosNotas,
+    safeCadastros
+  );
+
+  await saveState(current);
+
+  await writeAuditLog('cadastros_base_atualizados', {
+    totalColaboradores: safeCadastros.colaboradores.length,
+    totalLideresTecnicos: safeCadastros.lideresTecnicos.length,
+    totalFerramentas: safeCadastros.ferramentas.length,
+    totalVeiculos: safeCadastros.veiculos.length
+  });
+
+  return safeCadastros;
 }

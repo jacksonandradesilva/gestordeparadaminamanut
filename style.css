@@ -660,6 +660,75 @@ tbody tr:nth-child(even):hover {
 	color: var(--text-secondary);
 }
 
+.executantes-grid {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	width: 100%;
+	max-width: none;
+}
+
+.compact-list-field {
+	align-self: start;
+	grid-column: span 1;
+	width: 100%;
+	max-width: none;
+}
+
+.executante-row {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	width: 100%;
+}
+
+.compact-row {
+	max-width: none;
+	width: 100%;
+}
+
+.executante-row input {
+	flex: 1;
+	padding: 8px 10px;
+	font-size: 13px;
+}
+
+.executante-row textarea {
+	flex: 1;
+	min-height: 120px;
+}
+
+.compact-row .btn {
+	padding: 7px 10px;
+	font-size: 12px;
+	min-width: 96px;
+}
+
+.descricao-atividade-field {
+	grid-column: 1 / -1;
+}
+
+.descricao-atividade-field textarea {
+	min-height: 140px;
+}
+
+.atividade-item {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	width: 100%;
+	padding: 10px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--surface-alt);
+}
+
+.atividade-meta-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(180px, 1fr));
+	gap: 8px;
+}
+
 .empty-state {
 	padding: 48px 24px;
 	text-align: center;
