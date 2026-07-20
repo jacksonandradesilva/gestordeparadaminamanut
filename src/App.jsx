@@ -916,6 +916,37 @@ function CadastrosBasePage() {
     await persist(next);
   }
 
+  async function editItem(field, oldValue) {
+    const editedValue = window.prompt('Digite o novo valor:', oldValue);
+
+    if (editedValue === null) {
+      return;
+    }
+
+    const safeValue = String(editedValue || '').trim();
+
+    if (!safeValue) {
+      window.alert('O valor nao pode ficar vazio.');
+      return;
+    }
+
+    if (
+      cadastros[field].some(
+        (item) => item !== oldValue && normalizeText(item) === normalizeText(safeValue)
+      )
+    ) {
+      window.alert('Item ja cadastrado nessa lista.');
+      return;
+    }
+
+    const next = {
+      ...cadastros,
+      [field]: cadastros[field].map((item) => (item === oldValue ? safeValue : item))
+    };
+
+    await persist(next);
+  }
+
   return (
     <main className="page-shell">
       <Header title="Cadastros Base - Relatorio Eletrico" />
@@ -964,6 +995,7 @@ function CadastrosBasePage() {
                 <tr key={item}>
                   <td data-label="Colaborador">{item}</td>
                   <td data-label="Acoes">
+                    <button type="button" className="btn secundario" onClick={() => editItem('colaboradores', item)}>Editar</button>
                     <button type="button" className="btn excluir" onClick={() => removeItem('colaboradores', item)}>Excluir</button>
                   </td>
                 </tr>
@@ -993,6 +1025,7 @@ function CadastrosBasePage() {
                 <tr key={item}>
                   <td data-label="Lider Tecnico">{item}</td>
                   <td data-label="Acoes">
+                    <button type="button" className="btn secundario" onClick={() => editItem('lideresTecnicos', item)}>Editar</button>
                     <button type="button" className="btn excluir" onClick={() => removeItem('lideresTecnicos', item)}>Excluir</button>
                   </td>
                 </tr>
@@ -1024,6 +1057,7 @@ function CadastrosBasePage() {
                 <tr key={item}>
                   <td data-label="Ferramenta">{item}</td>
                   <td data-label="Acoes">
+                    <button type="button" className="btn secundario" onClick={() => editItem('ferramentas', item)}>Editar</button>
                     <button type="button" className="btn excluir" onClick={() => removeItem('ferramentas', item)}>Excluir</button>
                   </td>
                 </tr>
@@ -1053,6 +1087,7 @@ function CadastrosBasePage() {
                 <tr key={item}>
                   <td data-label="Veiculo">{item}</td>
                   <td data-label="Acoes">
+                    <button type="button" className="btn secundario" onClick={() => editItem('veiculos', item)}>Editar</button>
                     <button type="button" className="btn excluir" onClick={() => removeItem('veiculos', item)}>Excluir</button>
                   </td>
                 </tr>
