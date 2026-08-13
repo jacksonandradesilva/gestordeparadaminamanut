@@ -15,7 +15,8 @@ export const PAGE_ACCESS_KEYS = [
   'historico-opcoes',
   'dashboard-turnos',
   'agente-ia',
-  'treinamentos'
+  'status-treinamentos',
+  'colaboradores'
 ];
 
 const RELATORIO_EQUIPE_ELETRICA_KEY = '__relatorio_equipe_eletrica__';
@@ -52,8 +53,13 @@ function normalizeSupabaseUrl(url) {
 
 const SUPABASE_URL = normalizeSupabaseUrl(import.meta.env.VITE_SUPABASE_URL);
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const AUTORIZED_ADMIN_EMAILS = new Set(['jacksonandradesilva33@gmail.com']);
 const hasRemoteConfig = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 const storageMode = hasRemoteConfig ? 'supabase' : 'local';
+
+function isAutoAdminEmail(email) {
+  return typeof email === 'string' && AUTORIZED_ADMIN_EMAILS.has(email.trim().toLowerCase());
+}
 
 let hasLoggedModeNotice = false;
 
@@ -238,6 +244,10 @@ export async function getIsCurrentUserAdmin() {
 
   const user = await requireAuthenticatedUser();
 
+  if (isAutoAdminEmail(user.email)) {
+    return true;
+  }
+
   const { data, error } = await supabase
     .from(ADMIN_TABLE_NAME)
     .select('user_id')
@@ -257,6 +267,10 @@ export async function ensureCurrentUserAccessRequest() {
   }
 
   const user = await requireAuthenticatedUser();
+
+  if (isAutoAdminEmail(user.email)) {
+    return user;
+  }
 
   const { error } = await supabase
     .from(ACCESS_TABLE_NAME)
@@ -290,6 +304,19 @@ export async function getCurrentUserAccessProfile() {
   }
 
   const user = await ensureCurrentUserAccessRequest();
+
+  if (isAutoAdminEmail(user.email)) {
+    return {
+      user_id: user.id,
+      email: user.email || null,
+      status: 'approved',
+      allowed_pages: [...PAGE_ACCESS_KEYS],
+      approved_at: new Date().toISOString(),
+      approved_by: user.id,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+  }
 
   const { data, error } = await supabase
     .from(ACCESS_TABLE_NAME)
@@ -463,6 +490,61 @@ export async function deleteUserAccess(targetUserId) {
   return removed;
 }
 
+export async function uploadCollaboratorPhoto(file, collaboratorName = 'colaborador') {
+  if (!supabase) {
+    throw new Error('Supabase nao configurado. Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.');
+  }
+
+  if (!file) {
+    throw new Error('Selecione uma imagem antes de continuar.');
+  }
+
+  if (!file.type || !file.type.startsWith('image/')) {
+    throw new Error('O arquivo selecionado deve ser uma imagem.');
+  }
+
+  const safeName = String(collaboratorName || 'colaborador')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9-_]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || 'colaborador';
+
+  const extension = (file.name?.split('.').pop() || 'png').toLowerCase();
+  const fileName = `${safeName}-${Date.now()}.${extension}`;
+  const path = `treinamentos/${fileName}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('colaborador-fotos')
+    .upload(path, file, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: file.type || 'image/png'
+    });
+
+  if (uploadError) {
+    const message = String(uploadError?.message || '').toLowerCase();
+
+    if (message.includes('bucket') && message.includes('not found')) {
+      throw new Error('Crie o bucket "colaborador-fotos" no Supabase Storage antes de enviar a imagem.');
+    }
+
+    throw new Error(uploadError?.message || 'Nao foi possivel enviar a imagem para o armazenamento.');
+  }
+
+  const { data } = supabase.storage
+    .from('colaborador-fotos')
+    .getPublicUrl(path);
+
+  if (!data?.publicUrl) {
+    throw new Error('Nao foi possivel obter a URL publica da imagem.');
+  }
+
+  return data.publicUrl;
+}
+
 export async function writeAuditLog(action, details = {}) {
   if (!supabase) {
     return;
@@ -574,7 +656,9 @@ function getEmptyState() {
   return {
     equipamentos: [],
     historicoParadas: [],
-    relatorioTurnosNotas: {}
+    relatorioTurnosNotas: {},
+    treinamentos: [],
+    colaboradores: []
   };
 }
 // Clona o objeto relatorioTurnosNotas para evitar mutações externas
@@ -814,7 +898,9 @@ function cloneState(state) {
   return {
     equipamentos: Array.isArray(state?.equipamentos) ? [...state.equipamentos] : [],
     historicoParadas: Array.isArray(state?.historicoParadas) ? [...state.historicoParadas] : [],
-    relatorioTurnosNotas: cloneRelatorioTurnosNotas(state?.relatorioTurnosNotas)
+    relatorioTurnosNotas: cloneRelatorioTurnosNotas(state?.relatorioTurnosNotas),
+    treinamentos: Array.isArray(state?.treinamentos) ? [...state.treinamentos] : [],
+    colaboradores: Array.isArray(state?.colaboradores) ? [...state.colaboradores] : []
   };
 }
 // Lê o estado do localStorage, retornando um estado vazio em caso de erro
@@ -849,7 +935,7 @@ export async function getState() {
 
     const { data, error } = await supabase
       .from(TABLE_NAME)
-      .select('equipamentos, historico_paradas, relatorio_turnos_notas')
+      .select('equipamentos, historico_paradas, relatorio_turnos_notas, treinamentos, colaboradores')
       .eq('id', STATE_ID)
       .maybeSingle();
 
@@ -866,7 +952,9 @@ export async function getState() {
     const remoteState = cloneState({
       equipamentos: data.equipamentos,
       historicoParadas: data.historico_paradas,
-      relatorioTurnosNotas: data.relatorio_turnos_notas
+      relatorioTurnosNotas: data.relatorio_turnos_notas,
+      treinamentos: data.treinamentos,
+      colaboradores: data.colaboradores
     });
 
     writeLocalState(remoteState);
@@ -898,7 +986,13 @@ export async function saveState(state, authenticatedUser = null) {
       : currentState.historicoParadas,
     relatorioTurnosNotas: Object.prototype.hasOwnProperty.call(incomingState, 'relatorioTurnosNotas')
       ? incomingState.relatorioTurnosNotas
-      : currentState.relatorioTurnosNotas
+      : currentState.relatorioTurnosNotas,
+    treinamentos: Object.prototype.hasOwnProperty.call(incomingState, 'treinamentos')
+      ? incomingState.treinamentos
+      : currentState.treinamentos,
+    colaboradores: Object.prototype.hasOwnProperty.call(incomingState, 'colaboradores')
+      ? incomingState.colaboradores
+      : currentState.colaboradores
   };
 
   const safeState = writeLocalState(mergedState, storageKey);
@@ -915,7 +1009,9 @@ export async function saveState(state, authenticatedUser = null) {
         owner_id: user.id,
         equipamentos: safeState.equipamentos,
         historico_paradas: safeState.historicoParadas,
-        relatorio_turnos_notas: safeState.relatorioTurnosNotas
+        relatorio_turnos_notas: safeState.relatorioTurnosNotas,
+        treinamentos: safeState.treinamentos,
+        colaboradores: safeState.colaboradores
       }, { onConflict: 'id' });
 
     if (error) {

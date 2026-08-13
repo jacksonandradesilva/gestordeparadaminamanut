@@ -231,6 +231,228 @@ h2 {
 	margin-top: 20px;
 }
 
+.status-overview-panel,
+.status-section {
+	margin-top: 22px;
+	border: 1px solid var(--border);
+	border-radius: 16px;
+	background: linear-gradient(135deg, var(--surface) 0%, var(--surface-alt) 100%);
+	padding: 22px;
+	box-shadow: var(--shadow-sm);
+}
+
+.status-overview-header,
+.status-section-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 18px;
+}
+
+.eyebrow {
+	margin: 0 0 6px 0;
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--text-secondary);
+}
+
+.status-overview-header h2,
+.status-section-header h2 {
+	margin: 0;
+	font-size: clamp(1.2rem, 1.1rem + 0.4vw, 1.8rem);
+}
+
+.status-summary-grid,
+.status-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+	gap: 16px;
+}
+
+.status-summary-card {
+	padding: 18px 20px;
+}
+
+.status-summary-card--success {
+	border-color: rgba(22, 163, 74, 0.18);
+}
+
+.status-summary-card--warning {
+	border-color: rgba(217, 119, 6, 0.18);
+}
+
+.status-summary-card--danger {
+	border-color: rgba(220, 38, 38, 0.18);
+}
+
+.status-summary-card .card-label {
+	font-size: 11px;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--text-secondary);
+}
+
+.status-summary-card strong {
+	font-size: clamp(1.6rem, 1.4rem + 0.5vw, 2.2rem);
+	margin-top: 10px;
+}
+
+.status-section--success {
+	border-top: 4px solid #22c55e;
+}
+
+.status-section--warning {
+	border-top: 4px solid #f59e0b;
+}
+
+.status-section--danger {
+	border-top: 4px solid #ef4444;
+}
+
+.status-person-card {
+	background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+	border: 1px solid var(--border);
+	border-radius: 14px;
+	padding: 16px;
+	box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
+	transition: var(--transition);
+}
+
+.status-person-card:hover {
+	transform: translateY(-2px);
+	box-shadow: 0 12px 24px rgba(15, 23, 42, 0.08);
+}
+
+.status-person-card--success {
+	border-left: 4px solid #22c55e;
+}
+
+.status-person-card--warning {
+	border-left: 4px solid #f59e0b;
+}
+
+.status-person-card--danger {
+	border-left: 4px solid #ef4444;
+}
+
+.status-person-header {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin-bottom: 14px;
+}
+
+.status-person-avatar {
+	width: 52px;
+	height: 52px;
+	border-radius: 50%;
+	object-fit: cover;
+	border: 2px solid rgba(59, 130, 246, 0.2);
+	background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	font-weight: 700;
+	color: var(--primary);
+}
+
+.status-person-avatar--placeholder {
+	font-size: 18px;
+}
+
+.status-person-title-wrap h3 {
+	margin: 0;
+	font-size: 1.02rem;
+	line-height: 1.3;
+}
+
+.status-person-title-wrap span {
+	display: block;
+	font-size: 12px;
+	color: var(--text-secondary);
+	margin-top: 2px;
+}
+
+.status-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 7px 10px;
+	border-radius: 999px;
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	margin-bottom: 12px;
+}
+
+.status-chip--success {
+	background: #f0fdf4;
+	color: #166534;
+}
+
+.status-chip--warning {
+	background: #fff7ed;
+	color: #9a5a00;
+}
+
+.status-chip--danger {
+	background: #fef2f2;
+	color: #991b1b;
+}
+
+.status-chip-dot {
+	font-size: 10px;
+	line-height: 1;
+}
+
+.status-training-list {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	display: grid;
+	gap: 12px;
+}
+
+.status-training-item {
+	padding: 12px 10px 0 0;
+	border-top: 1px solid #e2e8f0;
+}
+
+.status-training-item:first-child {
+	border-top: none;
+	padding-top: 0;
+}
+
+.status-training-title-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 6px;
+}
+
+.status-training-title-row strong {
+	display: block;
+	font-size: 0.98rem;
+	line-height: 1.3;
+}
+
+.status-training-meta,
+.status-training-footer {
+	font-size: 12px;
+	color: var(--text-secondary);
+	line-height: 1.5;
+}
+
+.status-training-footer {
+	margin-top: 8px;
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
 .turno-tabs {
 	display: flex;
 	flex-wrap: wrap;
@@ -376,6 +598,56 @@ form {
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
+}
+
+.photo-upload-section {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	margin-bottom: 8px;
+}
+
+.photo-upload-box {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	padding: 14px;
+	border: 2px dashed var(--border);
+	border-radius: 12px;
+	background: linear-gradient(135deg, var(--surface) 0%, var(--surface-alt) 100%);
+}
+
+.photo-upload-box input[type="file"] {
+	flex: 1;
+	min-width: 0;
+	padding: 10px;
+	border: 1px solid var(--border);
+	border-radius: 9px;
+	background: #fff;
+}
+
+.photo-preview {
+	width: 96px;
+	height: 128px;
+	object-fit: cover;
+	border-radius: 10px;
+	border: 2px solid rgba(37, 99, 235, 0.2);
+	box-shadow: var(--shadow-sm);
+}
+
+.photo-placeholder {
+	width: 96px;
+	height: 128px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 10px;
+	background: linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%);
+	color: var(--text-secondary);
+	font-size: 12px;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
 }
 
 .form-field-wide {

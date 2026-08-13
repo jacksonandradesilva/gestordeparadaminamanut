@@ -25,6 +25,7 @@ import {
   saveState,
   signInWithPassword,
   signOut,
+  uploadCollaboratorPhoto,
   signUpWithPassword,
   subscribeAuthChanges,
   updateUserAccessPermissions,
@@ -44,7 +45,8 @@ const PAGE_ACCESS_OPTIONS = [
   { key: 'historico-opcoes', label: 'Historico por opcao', path: '/historico-opcoes' },
   { key: 'dashboard-turnos', label: 'Dashboard por turno', path: '/dashboard-turnos' },
   { key: 'agente-ia', label: 'Agente IA', path: '/agente-ia' },
-  { key: 'treinamentos', label: 'Cadastro de treinamentos', path: '/treinamentos' }
+  { key: 'status-treinamentos', label: 'Status de treinamentos', path: '/status-treinamentos' },
+  { key: 'colaboradores', label: 'Cadastro de colaboradores', path: '/colaboradores' }
 ];
 
 function normalizeAllowedPages(pages) {
@@ -848,6 +850,28 @@ function PageFooter() {
 
 const TREINAMENTOS_STORAGE_KEY = 'mina_treinamentos_v1';
 
+function buildTreinamentosFromColaboradores(colaboradores = []) {
+  return (Array.isArray(colaboradores) ? colaboradores : []).flatMap((colaborador) => {
+    const nomeColaborador = String(colaborador?.nome || '').trim() || 'Colaborador sem nome';
+    const listaTreinamentos = Array.isArray(colaborador?.treinamentos) ? colaborador.treinamentos : [];
+
+    return listaTreinamentos.map((treinamento, index) => ({
+      id: `${colaborador?.id ?? index}-${index}`,
+      colaborador: nomeColaborador,
+      fotoUrl: String(colaborador?.fotoUrl || '').trim(),
+      treinamento: String(treinamento?.nome || `Treinamento ${index + 1}`).trim(),
+      categoria: '',
+      data: String(treinamento?.dataInicio || treinamento?.dataFim || '').trim(),
+      dataInicio: String(treinamento?.dataInicio || '').trim(),
+      dataFim: String(treinamento?.dataFim || '').trim(),
+      instrutor: '',
+      cargaHoraria: '',
+      status: resolveTreinamentoStatus({ dataFim: treinamento?.dataFim || treinamento?.dataInicio || '' }),
+      observacoes: ''
+    }));
+  });
+}
+
 function getEmptyTreinamentos() {
   return [];
 }
@@ -871,14 +895,15 @@ function readTreinamentos() {
       .map((item) => ({
         id: Number(item.id) || Date.now() + Math.random(),
         colaborador: String(item.colaborador || '').trim(),
+        fotoUrl: String(item.fotoUrl || '').trim(),
         treinamento: String(item.treinamento || '').trim(),
         categoria: String(item.categoria || '').trim(),
-        data: String(item.data || '').trim(),
+        data: String(item.data || item.dataInicio || '').trim(),
+        dataInicio: String(item.dataInicio || item.data || '').trim(),
+        dataFim: String(item.dataFim || '').trim(),
         instrutor: String(item.instrutor || '').trim(),
         cargaHoraria: String(item.cargaHoraria || '').trim(),
-        status: ['Agendado', 'Em andamento', 'Concluido', 'Vencido'].includes(String(item.status || ''))
-          ? String(item.status)
-          : 'Agendado',
+        status: resolveTreinamentoStatus(item),
         observacoes: String(item.observacoes || '').trim()
       }))
       .filter((item) => item.colaborador || item.treinamento);
@@ -888,42 +913,800 @@ function readTreinamentos() {
   }
 }
 
+function resolveTreinamentoStatus(item = {}) {
+  const rawDataFim = item.dataFim || item.data || item.dataFinal || '';
+
+  if (!rawDataFim) {
+    return 'Liberado';
+  }
+
+  const dataFim = new Date(`${rawDataFim}T00:00:00`);
+
+  if (Number.isNaN(dataFim.getTime())) {
+    return 'Liberado';
+  }
+
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+
+  const diferenca = Math.ceil((dataFim - hoje) / (1000 * 60 * 60 * 24));
+
+  if (diferenca < 0) {
+    return 'Vencido';
+  }
+
+  if (diferenca <= 30) {
+    return 'Agendamento';
+  }
+
+  return 'Liberado';
+}
+
+function getTreinamentoBadgeClass(status) {
+  if (status === 'Vencido') {
+    return 'badge-danger';
+  }
+
+  if (status === 'Agendamento') {
+    return 'badge-warning';
+  }
+
+  return 'badge-success';
+}
+
+function getStatusMeta(status) {
+  if (status === 'Vencido') {
+    return {
+      label: 'Vencido',
+      tone: 'danger',
+      icon: '●',
+      accent: '#dc2626',
+      softBg: '#fff1f2',
+      border: '#fecdd3'
+    };
+  }
+
+  if (status === 'Agendamento') {
+    return {
+      label: 'Em agendamento',
+      tone: 'warning',
+      icon: '●',
+      accent: '#d97706',
+      softBg: '#fff7ed',
+      border: '#fed7aa'
+    };
+  }
+
+  return {
+    label: 'Liberado',
+    tone: 'success',
+    icon: '●',
+    accent: '#16a34a',
+    softBg: '#f0fdf4',
+    border: '#bbf7d0'
+  };
+}
+
+function getDiasRestantes(dataFim, status = '') {
+  if (!dataFim) {
+    return null;
+  }
+
+  const dataFinal = new Date(`${dataFim}T00:00:00`);
+  if (Number.isNaN(dataFinal.getTime())) {
+    return null;
+  }
+
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+
+  const diferenca = Math.ceil((dataFinal - hoje) / (1000 * 60 * 60 * 24));
+
+  if (status === 'Vencido' || diferenca < 0) {
+    return `Venceu há ${Math.abs(diferenca)} dia(s)`;
+  }
+
+  if (diferenca === 0) {
+    return 'Vence hoje';
+  }
+
+  return `Faltam ${diferenca} dia(s)`;
+}
+
 function writeTreinamentos(list) {
   const safeList = Array.isArray(list) ? list : [];
-  const normalized = safeList.map((item, index) => ({
-    id: Number(item.id) || Date.now() + index,
-    colaborador: String(item.colaborador || '').trim(),
-    treinamento: String(item.treinamento || '').trim(),
-    categoria: String(item.categoria || '').trim(),
-    data: String(item.data || '').trim(),
-    instrutor: String(item.instrutor || '').trim(),
-    cargaHoraria: String(item.cargaHoraria || '').trim(),
-    status: ['Agendado', 'Em andamento', 'Concluido', 'Vencido'].includes(String(item.status || ''))
-      ? String(item.status)
-      : 'Agendado',
-    observacoes: String(item.observacoes || '').trim()
-  })).filter((item) => item.colaborador || item.treinamento);
+  const normalized = safeList.map((item, index) => {
+    const computedStatus = resolveTreinamentoStatus(item);
+
+    return {
+      id: Number(item.id) || Date.now() + index,
+      colaborador: String(item.colaborador || '').trim(),
+      fotoUrl: String(item.fotoUrl || '').trim(),
+      treinamento: String(item.treinamento || '').trim(),
+      categoria: String(item.categoria || '').trim(),
+      data: String(item.data || item.dataInicio || '').trim(),
+      dataInicio: String(item.dataInicio || item.data || '').trim(),
+      dataFim: String(item.dataFim || '').trim(),
+      instrutor: String(item.instrutor || '').trim(),
+      cargaHoraria: String(item.cargaHoraria || '').trim(),
+      status: computedStatus,
+      observacoes: String(item.observacoes || '').trim()
+    };
+  }).filter((item) => item.colaborador || item.treinamento);
 
   window.localStorage.setItem(TREINAMENTOS_STORAGE_KEY, JSON.stringify(normalized));
+  saveState({ treinamentos: normalized }).catch(() => {});
+
   return normalized;
+}
+
+function StatusTreinamentosPage() {
+  const [registros, setRegistros] = useState([]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadRegistros() {
+      try {
+        const state = await getState();
+        if (!active) {
+          return;
+        }
+
+        const lista = Array.isArray(state?.treinamentos) && state.treinamentos.length > 0
+          ? state.treinamentos
+          : buildTreinamentosFromColaboradores(state?.colaboradores || []);
+
+        setRegistros(lista.length > 0 ? lista : readTreinamentos());
+      } catch {
+        if (active) {
+          const fallback = buildTreinamentosFromColaboradores(JSON.parse(window.localStorage.getItem('mina_status_store_v1') || 'null')?.colaboradores || []);
+          setRegistros(fallback.length > 0 ? fallback : readTreinamentos());
+        }
+      }
+    }
+
+    loadRegistros();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const liberados = registros.filter((item) => resolveTreinamentoStatus(item) === 'Liberado');
+  const agendados = registros.filter((item) => resolveTreinamentoStatus(item) === 'Agendamento');
+  const vencidos = registros.filter((item) => resolveTreinamentoStatus(item) === 'Vencido');
+
+  function buildAgrupados(list, statusName) {
+    return Array.from(
+      list.reduce((map, item) => {
+        const key = String(item.colaborador || 'Colaborador sem nome').trim() || 'Colaborador sem nome';
+        const atual = map.get(key) || {
+          colaborador: key,
+          fotoUrl: item.fotoUrl || '',
+          treinamentos: []
+        };
+
+        atual.treinamentos.push({
+          id: item.id,
+          treinamento: item.treinamento,
+          categoria: item.categoria,
+          dataInicio: item.dataInicio,
+          dataFim: item.dataFim,
+          status: statusName
+        });
+
+        map.set(key, atual);
+        return map;
+      }, new Map()).values()
+    ).sort((a, b) => a.colaborador.localeCompare(b.colaborador, 'pt-BR'));
+  }
+
+  const agrupadosLiberados = buildAgrupados(liberados, 'Liberado');
+  const agrupadosAgendados = buildAgrupados(agendados, 'Agendamento');
+  const agrupadosVencidos = buildAgrupados(vencidos, 'Vencido');
+
+  async function handleClearAll() {
+    const confirmed = window.confirm('Deseja limpar todos os dados de treinamentos e colaboradores?');
+
+    if (!confirmed) {
+      return;
+    }
+
+    setRegistros([]);
+    window.localStorage.removeItem(TREINAMENTOS_STORAGE_KEY);
+    await saveState({ treinamentos: [], colaboradores: [] });
+  }
+
+  function renderColaboradorCard(colaborador, statusGrupo) {
+    const meta = getStatusMeta(statusGrupo);
+
+    return (
+      <article key={colaborador.colaborador} className={`status-person-card status-person-card--${meta.tone}`}>
+        <div className="status-person-header">
+          {colaborador.fotoUrl ? (
+            <img
+              src={colaborador.fotoUrl}
+              alt={colaborador.colaborador}
+              className="status-person-avatar"
+            />
+          ) : (
+            <span className="status-person-avatar status-person-avatar--placeholder">{colaborador.colaborador?.charAt(0)?.toUpperCase() || '-'}</span>
+          )}
+
+          <div className="status-person-title-wrap">
+            <h3>{colaborador.colaborador}</h3>
+            <span>{colaborador.treinamentos.length} treinamento(s)</span>
+          </div>
+        </div>
+
+        <div className={`status-chip status-chip--${meta.tone}`}>
+          <span className="status-chip-dot">{meta.icon}</span>
+          {meta.label}
+        </div>
+
+        <ul className="status-training-list">
+          {colaborador.treinamentos.map((item) => (
+            <li key={item.id} className="status-training-item">
+              <div className="status-training-title-row">
+                <strong>{item.treinamento}</strong>
+                <span className={getTreinamentoBadgeClass(item.status)}>{item.status}</span>
+              </div>
+
+              <div className="status-training-meta">
+                {item.categoria ? `${item.categoria} • ` : ''}
+                {item.dataFim ? `Fim: ${new Date(`${item.dataFim}T00:00:00`).toLocaleDateString('pt-BR')}` : 'Data final indisponivel'}
+              </div>
+
+              {item.dataFim && (
+                <div className="status-training-footer">
+                  <span>{getDiasRestantes(item.dataFim, item.status)}</span>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      </article>
+    );
+  }
+
+  return (
+    <main className="page-shell">
+      <Header title="Status de Gestao de Treinamentos" />
+
+      <div className="page-actions">
+        <LinkButton to="/">Voltar ao painel</LinkButton>
+        <button type="button" className="btn excluir" onClick={handleClearAll}>Limpar todos os dados</button>
+      </div>
+
+      <section className="status-overview-panel">
+        <div className="status-overview-header">
+          <div>
+            <p className="eyebrow">Visão geral</p>
+            <h2>Monitoramento de treinamentos</h2>
+          </div>
+        </div>
+
+        <div className="status-summary-grid">
+          <article className="card status-summary-card status-summary-card--success">
+            <span className="card-label">Colaboradores liberados</span>
+            <strong>{agrupadosLiberados.length}</strong>
+          </article>
+          <article className="card status-summary-card status-summary-card--success">
+            <span className="card-label">Treinamentos liberados</span>
+            <strong>{liberados.length}</strong>
+          </article>
+          <article className="card status-summary-card status-summary-card--warning">
+            <span className="card-label">Em agendamento</span>
+            <strong>{agrupadosAgendados.length}</strong>
+          </article>
+          <article className="card status-summary-card status-summary-card--warning">
+            <span className="card-label">Treinamentos agendados</span>
+            <strong>{agendados.length}</strong>
+          </article>
+          <article className="card status-summary-card status-summary-card--danger">
+            <span className="card-label">Vencidos</span>
+            <strong>{agrupadosVencidos.length}</strong>
+          </article>
+          <article className="card status-summary-card status-summary-card--danger">
+            <span className="card-label">Treinamentos vencidos</span>
+            <strong>{vencidos.length}</strong>
+          </article>
+        </div>
+      </section>
+
+      <section className="status-section status-section--success">
+        <div className="status-section-header">
+          <div>
+            <p className="eyebrow">Status</p>
+            <h2>Treinamentos liberados</h2>
+          </div>
+        </div>
+
+        {agrupadosLiberados.length === 0 ? (
+          <div className="empty-state">Nenhum treinamento liberado no momento.</div>
+        ) : (
+          <div className="status-grid">
+            {agrupadosLiberados.map((colaborador) => renderColaboradorCard(colaborador, 'Liberado'))}
+          </div>
+        )}
+      </section>
+
+      <section className="status-section status-section--warning">
+        <div className="status-section-header">
+          <div>
+            <p className="eyebrow">Status</p>
+            <h2>Treinamentos em agendamento</h2>
+          </div>
+        </div>
+
+        {agrupadosAgendados.length === 0 ? (
+          <div className="empty-state">Nenhum treinamento em agendamento no momento.</div>
+        ) : (
+          <div className="status-grid">
+            {agrupadosAgendados.map((colaborador) => renderColaboradorCard(colaborador, 'Agendamento'))}
+          </div>
+        )}
+      </section>
+
+      <section className="status-section status-section--danger">
+        <div className="status-section-header">
+          <div>
+            <p className="eyebrow">Status</p>
+            <h2>Treinamentos vencidos</h2>
+          </div>
+        </div>
+
+        {agrupadosVencidos.length === 0 ? (
+          <div className="empty-state">Nenhum treinamento vencido no momento.</div>
+        ) : (
+          <div className="status-grid">
+            {agrupadosVencidos.map((colaborador) => renderColaboradorCard(colaborador, 'Vencido'))}
+          </div>
+        )}
+      </section>
+
+      <PageFooter />
+    </main>
+  );
+}
+
+function ColaboradoresPage() {
+  const [colaboradores, setColaboradores] = useState([]);
+  const [editingId, setEditingId] = useState(null);
+  const [formData, setFormData] = useState({
+    matricula: '',
+    nome: '',
+    setor: '',
+    fotoUrl: '',
+    treinamentos: [{ nome: '', dataInicio: '', dataFim: '' }]
+  });
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadColaboradores() {
+      try {
+        const state = await getState();
+        if (!active) {
+          return;
+        }
+
+        const lista = Array.isArray(state?.colaboradores) ? state.colaboradores : [];
+        setColaboradores(lista);
+      } catch {
+        if (active) {
+          setColaboradores([]);
+        }
+      }
+    }
+
+    loadColaboradores();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  function updateField(field, value) {
+    setFormData((current) => ({
+      ...current,
+      [field]: value
+    }));
+  }
+
+  function updateTreinamentoField(index, field, value) {
+    setFormData((current) => ({
+      ...current,
+      treinamentos: current.treinamentos.map((treinamento, treinoIndex) => (
+        treinoIndex === index ? { ...treinamento, [field]: value } : treinamento
+      ))
+    }));
+  }
+
+  function addTreinamento() {
+    setFormData((current) => ({
+      ...current,
+      treinamentos: [...current.treinamentos, { nome: '', dataInicio: '', dataFim: '' }]
+    }));
+  }
+
+  function removeTreinamento(index) {
+    setFormData((current) => ({
+      ...current,
+      treinamentos: current.treinamentos.filter((_, treinoIndex) => treinoIndex !== index)
+    }));
+  }
+
+  async function handlePhotoUpload(event) {
+    const file = event.target.files?.[0];
+
+    if (!file) {
+      return;
+    }
+
+    try {
+      const uploadedUrl = await uploadCollaboratorPhoto(file, formData.nome || formData.matricula || 'colaborador');
+      setFormData((current) => ({
+        ...current,
+        fotoUrl: uploadedUrl
+      }));
+    } catch (error) {
+      window.alert(error?.message || 'Nao foi possivel enviar a foto do colaborador.');
+    } finally {
+      event.target.value = '';
+    }
+  }
+
+  function resetForm() {
+    setFormData({
+      matricula: '',
+      nome: '',
+      setor: '',
+      fotoUrl: '',
+      treinamentos: [{ nome: '', dataInicio: '', dataFim: '' }]
+    });
+    setEditingId(null);
+  }
+
+  function startEdit(colaborador) {
+    setEditingId(colaborador.id);
+    setFormData({
+      matricula: colaborador.matricula || '',
+      nome: colaborador.nome || '',
+      setor: colaborador.setor || '',
+      fotoUrl: colaborador.fotoUrl || '',
+      treinamentos: Array.isArray(colaborador.treinamentos) && colaborador.treinamentos.length > 0
+        ? colaborador.treinamentos.map((treinamento) => ({
+            nome: treinamento.nome || '',
+            dataInicio: treinamento.dataInicio || '',
+            dataFim: treinamento.dataFim || ''
+          }))
+        : [{ nome: '', dataInicio: '', dataFim: '' }]
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+
+    const matricula = formData.matricula.trim();
+    const nome = formData.nome.trim();
+
+    if (!matricula || !nome) {
+      window.alert('Preencha a matricula e o nome do colaborador.');
+      return;
+    }
+
+    const treinamentosValidos = formData.treinamentos
+      .map((treinamento) => ({
+        nome: String(treinamento.nome || '').trim(),
+        dataInicio: String(treinamento.dataInicio || '').trim(),
+        dataFim: String(treinamento.dataFim || '').trim()
+      }))
+      .filter((treinamento) => treinamento.nome)
+      .map((treinamento) => {
+        if (treinamento.dataInicio && treinamento.dataFim && treinamento.dataFim < treinamento.dataInicio) {
+          throw new Error(`A data final do treinamento "${treinamento.nome}" deve ser igual ou posterior à data de início.`);
+        }
+
+        const status = resolveTreinamentoStatus({ dataFim: treinamento.dataFim || treinamento.dataInicio || '' });
+
+        return {
+          ...treinamento,
+          status
+        };
+      });
+
+    try {
+      if (formData.treinamentos.some((treinamento) => treinamento.nome && treinamento.dataInicio && treinamento.dataFim && treinamento.dataFim < treinamento.dataInicio)) {
+        throw new Error('Uma das datas finais está anterior à data de início.');
+      }
+
+      const payload = {
+        id: editingId ?? Date.now(),
+        matricula,
+        nome,
+        setor: formData.setor.trim(),
+        fotoUrl: formData.fotoUrl.trim(),
+        treinamentos: treinamentosValidos,
+        cadastro: editingId
+          ? (colaboradores.find((item) => item.id === editingId)?.cadastro || new Date().toISOString().slice(0, 10))
+          : new Date().toISOString().slice(0, 10)
+      };
+
+      const next = editingId
+        ? colaboradores.map((item) => item.id === editingId ? payload : item)
+        : [payload, ...colaboradores];
+
+      const statusSync = buildTreinamentosFromColaboradores(next);
+
+      setColaboradores(next);
+      resetForm();
+      await saveState({ colaboradores: next, treinamentos: statusSync });
+    } catch (error) {
+      window.alert(error?.message || 'Dados do treinamento invalidos.');
+    }
+  }
+
+  async function handleDelete(id) {
+    const next = colaboradores.filter((item) => item.id !== id);
+    const statusSync = buildTreinamentosFromColaboradores(next);
+
+    setColaboradores(next);
+    await saveState({ colaboradores: next, treinamentos: statusSync });
+  }
+
+  function formatTreinamentoLabel(item) {
+    if (!item || typeof item !== 'object') {
+      return String(item || '');
+    }
+
+    const nome = String(item.nome || '').trim();
+    const dataInicio = item.dataInicio ? new Date(`${item.dataInicio}T00:00:00`).toLocaleDateString('pt-BR') : '';
+    const dataFim = item.dataFim ? new Date(`${item.dataFim}T00:00:00`).toLocaleDateString('pt-BR') : '';
+
+    if (!nome) {
+      return '-';
+    }
+
+    if (dataInicio || dataFim) {
+      return `${nome} (${dataInicio || 'sem início'} - ${dataFim || 'sem fim'})`;
+    }
+
+    return nome;
+  }
+
+  function getTreinamentoStatusBadge(item) {
+    const status = item?.status || resolveTreinamentoStatus({ dataFim: item?.dataFim || item?.data || '' });
+    const dias = getDiasRestantes(item?.dataFim || item?.data || '', status);
+
+    return (
+      <span
+        className={status === 'Vencido' ? 'badge-danger' : status === 'Agendamento' ? 'badge-warning' : 'badge-success'}
+        style={{ marginLeft: 8, display: 'inline-block', verticalAlign: 'middle' }}
+      >
+        {status}
+        {dias ? ` • ${dias}` : ''}
+      </span>
+    );
+  }
+
+  return (
+    <main className="page-shell">
+      <Header title="Cadastro de Colaboradores" />
+
+      <div className="page-actions">
+        <LinkButton to="/">Voltar ao painel</LinkButton>
+        <LinkButton to="/status-treinamentos">Status de Treinamentos</LinkButton>
+      </div>
+
+      <section className="card">
+        <h2>{editingId ? 'Editar colaborador' : 'Novo colaborador'}</h2>
+        <form className="ai-agent-form" onSubmit={handleSubmit}>
+          <div className="summary-cards">
+            <div className="form-field">
+              <label>Matricula</label>
+              <input value={formData.matricula} onChange={(event) => updateField('matricula', event.target.value)} placeholder="Ex: 12345" />
+            </div>
+            <div className="form-field">
+              <label>Nome</label>
+              <input value={formData.nome} onChange={(event) => updateField('nome', event.target.value)} placeholder="Nome completo" />
+            </div>
+            <div className="form-field">
+              <label>Setor</label>
+              <input value={formData.setor} onChange={(event) => updateField('setor', event.target.value)} placeholder="Ex: Manutencao" />
+            </div>
+          </div>
+
+          <div className="photo-upload-section">
+            <label>Foto 3x4</label>
+            <div className="photo-upload-box">
+              <input type="file" accept="image/*" onChange={handlePhotoUpload} />
+              {formData.fotoUrl ? (
+                <img src={formData.fotoUrl} alt="Preview do colaborador" className="photo-preview" />
+              ) : (
+                <div className="photo-placeholder">Sem foto</div>
+              )}
+            </div>
+          </div>
+
+          <div className="form-field">
+            <label>Treinamentos realizados</label>
+
+            {formData.treinamentos.map((treinamento, index) => (
+              <div key={`treinamento-${index}`} style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr 1fr auto', gap: 12, marginBottom: 12, alignItems: 'end' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: 6 }}>Nome do treinamento</label>
+                  <input
+                    value={treinamento.nome}
+                    onChange={(event) => updateTreinamentoField(index, 'nome', event.target.value)}
+                    placeholder="Ex: NR-10"
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: 6 }}>Data início</label>
+                  <input
+                    type="date"
+                    value={treinamento.dataInicio}
+                    onChange={(event) => updateTreinamentoField(index, 'dataInicio', event.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', marginBottom: 6 }}>Data fim</label>
+                  <input
+                    type="date"
+                    value={treinamento.dataFim}
+                    onChange={(event) => updateTreinamentoField(index, 'dataFim', event.target.value)}
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  className="btn secundario"
+                  onClick={() => removeTreinamento(index)}
+                  disabled={formData.treinamentos.length === 1}
+                  style={{ minHeight: 42 }}
+                >
+                  Remover
+                </button>
+              </div>
+            ))}
+
+            <div className="form-actions" style={{ justifyContent: 'flex-start' }}>
+              <button type="button" className="btn secundario" onClick={addTreinamento}>Adicionar treinamento</button>
+            </div>
+          </div>
+
+          <div className="form-actions">
+            <button type="submit">{editingId ? 'Salvar alterações' : 'Salvar colaborador'}</button>
+            {editingId && (
+              <button type="button" className="btn secundario" onClick={resetForm}>Cancelar</button>
+            )}
+          </div>
+        </form>
+      </section>
+
+      <section className="card">
+        <h2>Colaboradores cadastrados</h2>
+
+        {colaboradores.length === 0 ? (
+          <div className="empty-state">Nenhum colaborador cadastrado.</div>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Matricula</th>
+                <th>Nome</th>
+                <th>Setor</th>
+                <th>Treinamentos</th>
+                <th>Data</th>
+                <th>Acoes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {colaboradores.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.matricula}</td>
+                  <td>{item.nome}</td>
+                  <td>{item.setor || '-'}</td>
+                  <td>
+                    {Array.isArray(item.treinamentos) && item.treinamentos.length > 0 ? (
+                      <ul style={{ margin: 0, paddingLeft: 18 }}>
+                        {item.treinamentos.map((treinamento, index) => (
+                          <li key={`${item.id}-${index}`}>
+                            {formatTreinamentoLabel(treinamento)}
+                            {getTreinamentoStatusBadge(treinamento)}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      '-'
+                    )}
+                  </td>
+                  <td>{item.cadastro || '-'}</td>
+                  <td>
+                    <button type="button" className="btn secundario" onClick={() => startEdit(item)} style={{ marginRight: 8 }}>Editar</button>
+                    <button type="button" className="btn excluir" onClick={() => handleDelete(item.id)}>Excluir</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <PageFooter />
+    </main>
+  );
 }
 
 function TreinamentosPage() {
   const [registros, setRegistros] = useState([]);
+  const [editingId, setEditingId] = useState(null);
+  const [filtroColaborador, setFiltroColaborador] = useState('');
+  const [filtroStatus, setFiltroStatus] = useState('Todos');
   const [formData, setFormData] = useState({
     colaborador: '',
+    fotoUrl: '',
     treinamento: '',
     categoria: '',
     data: '',
+    dataInicio: '',
+    dataFim: '',
     instrutor: '',
     cargaHoraria: '',
-    status: 'Agendado',
+    status: 'Liberado',
     observacoes: ''
   });
 
   useEffect(() => {
-    setRegistros(readTreinamentos());
+    let active = true;
+
+    async function loadTreinamentos() {
+      try {
+        const state = await getState();
+        if (!active) {
+          return;
+        }
+
+        const next = Array.isArray(state.treinamentos) && state.treinamentos.length > 0
+          ? state.treinamentos
+          : readTreinamentos();
+
+        setRegistros(next);
+      } catch {
+        if (active) {
+          setRegistros(readTreinamentos());
+        }
+      }
+    }
+
+    loadTreinamentos();
+
+    return () => {
+      active = false;
+    };
   }, []);
+
+  function resetForm() {
+    setEditingId(null);
+    setFormData({
+      colaborador: '',
+      fotoUrl: '',
+      treinamento: '',
+      categoria: '',
+      data: '',
+      dataInicio: '',
+      dataFim: '',
+      instrutor: '',
+      cargaHoraria: '',
+      status: 'Liberado',
+      observacoes: ''
+    });
+  }
 
   function updateField(field, value) {
     setFormData((current) => ({
@@ -935,48 +1718,82 @@ function TreinamentosPage() {
   function handleSubmit(event) {
     event.preventDefault();
 
-    const nextItem = {
-      id: Date.now(),
-      colaborador: formData.colaborador.trim(),
-      treinamento: formData.treinamento.trim(),
-      categoria: formData.categoria.trim(),
-      data: formData.data,
-      instrutor: formData.instrutor.trim(),
-      cargaHoraria: formData.cargaHoraria.trim(),
-      status: formData.status,
-      observacoes: formData.observacoes.trim()
-    };
-
-    if (!nextItem.colaborador || !nextItem.treinamento) {
+    if (!formData.colaborador.trim() || !formData.treinamento.trim()) {
       window.alert('Preencha pelo menos o colaborador e o treinamento.');
       return;
     }
 
-    const updated = writeTreinamentos([nextItem, ...registros]);
+    if (formData.dataInicio && formData.dataFim && formData.dataFim < formData.dataInicio) {
+      window.alert('A data final deve ser igual ou posterior à data de início.');
+      return;
+    }
+
+    const nextItem = {
+      id: editingId ?? Date.now(),
+      colaborador: formData.colaborador.trim(),
+      fotoUrl: formData.fotoUrl.trim(),
+      treinamento: formData.treinamento.trim(),
+      categoria: formData.categoria.trim(),
+      data: formData.data || formData.dataInicio || '',
+      dataInicio: formData.dataInicio,
+      dataFim: formData.dataFim,
+      instrutor: formData.instrutor.trim(),
+      cargaHoraria: formData.cargaHoraria.trim(),
+      status: resolveTreinamentoStatus({
+        dataFim: formData.dataFim,
+        data: formData.data,
+        dataInicio: formData.dataInicio
+      }),
+      observacoes: formData.observacoes.trim()
+    };
+
+    const base = Array.isArray(registros) ? registros : [];
+    const updated = editingId !== null
+      ? writeTreinamentos(base.map((item) => item.id === editingId ? { ...item, ...nextItem } : item))
+      : writeTreinamentos([nextItem, ...base]);
+
     setRegistros(updated);
+    resetForm();
+  }
+
+  function handleEdit(item) {
+    setEditingId(item.id);
     setFormData({
-      colaborador: '',
-      treinamento: '',
-      categoria: '',
-      data: '',
-      instrutor: '',
-      cargaHoraria: '',
-      status: 'Agendado',
-      observacoes: ''
+      colaborador: item.colaborador || '',
+      fotoUrl: item.fotoUrl || '',
+      treinamento: item.treinamento || '',
+      categoria: item.categoria || '',
+      data: item.data || item.dataInicio || '',
+      dataInicio: item.dataInicio || item.data || '',
+      dataFim: item.dataFim || '',
+      instrutor: item.instrutor || '',
+      cargaHoraria: item.cargaHoraria || '',
+      status: item.status || 'Liberado',
+      observacoes: item.observacoes || ''
     });
   }
 
   function handleDelete(id) {
     const updated = writeTreinamentos(registros.filter((item) => item.id !== id));
     setRegistros(updated);
+
+    if (editingId === id) {
+      resetForm();
+    }
   }
 
-  const concluidos = registros.filter((item) => item.status === 'Concluido').length;
-  const agendados = registros.filter((item) => item.status === 'Agendado').length;
+  const liberados = registros.filter((item) => resolveTreinamentoStatus(item) === 'Liberado').length;
+  const vencidos = registros.filter((item) => resolveTreinamentoStatus(item) === 'Vencido').length;
+
+  const registrosFiltrados = registros.filter((item) => {
+    const matchesColaborador = !filtroColaborador || String(item.colaborador || '').toLowerCase().includes(filtroColaborador.toLowerCase());
+    const matchesStatus = filtroStatus === 'Todos' || item.status === filtroStatus;
+    return matchesColaborador && matchesStatus;
+  });
 
   return (
     <main className="page-shell">
-      <Header title="Cadastro de Treinamentos" />
+      <Header title="Gestao de Treinamentos dos Colaboradores" />
 
       <div className="page-actions">
         <LinkButton to="/">Voltar ao painel</LinkButton>
@@ -988,17 +1805,17 @@ function TreinamentosPage() {
           <strong>{registros.length}</strong>
         </article>
         <article className="card">
-          <span>Agendados</span>
-          <strong>{agendados}</strong>
+          <span>Liberados</span>
+          <strong>{liberados}</strong>
         </article>
         <article className="card">
-          <span>Concluidos</span>
-          <strong>{concluidos}</strong>
+          <span>Vencidos</span>
+          <strong>{vencidos}</strong>
         </article>
       </section>
 
       <section className="card">
-        <h2>Novo treinamento</h2>
+        <h2>{editingId !== null ? 'Editar treinamento' : 'Novo treinamento'}</h2>
         <form className="ai-agent-form" onSubmit={handleSubmit}>
           <div className="summary-cards">
             <div className="form-field">
@@ -1013,32 +1830,16 @@ function TreinamentosPage() {
 
           <div className="summary-cards">
             <div className="form-field">
-              <label>Categoria</label>
-              <input value={formData.categoria} onChange={(event) => updateField('categoria', event.target.value)} placeholder="Seguranca, qualidade, operacional..." />
+              <label>Data inicio</label>
+              <input type="date" value={formData.dataInicio} onChange={(event) => updateField('dataInicio', event.target.value)} />
             </div>
             <div className="form-field">
-              <label>Data</label>
-              <input type="date" value={formData.data} onChange={(event) => updateField('data', event.target.value)} />
+              <label>Data fim</label>
+              <input type="date" value={formData.dataFim} onChange={(event) => updateField('dataFim', event.target.value)} />
             </div>
-            <div className="form-field">
-              <label>Instrutor</label>
-              <input value={formData.instrutor} onChange={(event) => updateField('instrutor', event.target.value)} placeholder="Nome do instrutor" />
-            </div>
-            <div className="form-field">
-              <label>Carga horaria</label>
-              <input value={formData.cargaHoraria} onChange={(event) => updateField('cargaHoraria', event.target.value)} placeholder="Ex: 8h" />
-            </div>
-          </div>
-
-          <div className="summary-cards">
             <div className="form-field">
               <label>Status</label>
-              <select value={formData.status} onChange={(event) => updateField('status', event.target.value)}>
-                <option>Agendado</option>
-                <option>Em andamento</option>
-                <option>Concluido</option>
-                <option>Vencido</option>
-              </select>
+              <input value={resolveTreinamentoStatus({ status: formData.status, dataFim: formData.dataFim })} readOnly aria-label="Status calculado automaticamente" />
             </div>
           </div>
 
@@ -1048,50 +1849,88 @@ function TreinamentosPage() {
           </div>
 
           <div className="form-actions">
-            <button type="submit">Salvar treinamento</button>
+            <button type="submit">{editingId !== null ? 'Atualizar treinamento' : 'Salvar treinamento'}</button>
+            {editingId !== null && (
+              <button type="button" className="btn secundario" onClick={resetForm}>Cancelar edicao</button>
+            )}
           </div>
         </form>
       </section>
 
       <section className="card">
         <h2>Registros cadastrados</h2>
-        {registros.length === 0 ? (
-          <div className="empty-state">Nenhum treinamento cadastrado ainda.</div>
+
+        <div className="summary-cards">
+          <div className="form-field">
+            <label>Buscar colaborador</label>
+            <input
+              value={filtroColaborador}
+              onChange={(event) => setFiltroColaborador(event.target.value)}
+              placeholder="Filtrar por nome"
+            />
+          </div>
+          <div className="form-field">
+            <label>Status</label>
+            <select value={filtroStatus} onChange={(event) => setFiltroStatus(event.target.value)}>
+              <option>Todos</option>
+              <option>Liberado</option>
+              <option>Vencido</option>
+            </select>
+          </div>
+        </div>
+
+        {registrosFiltrados.length === 0 ? (
+          <div className="empty-state">Nenhum treinamento encontrado com os filtros aplicados.</div>
         ) : (
           <table>
             <thead>
               <tr>
+                <th>Foto</th>
                 <th>Colaborador</th>
                 <th>Treinamento</th>
-                <th>Categoria</th>
-                <th>Data</th>
-                <th>Instrutor</th>
-                <th>Carga</th>
+                <th>Data inicio</th>
+                <th>Data fim</th>
                 <th>Status</th>
                 <th>Observacoes</th>
                 <th>Acoes</th>
               </tr>
             </thead>
             <tbody>
-              {registros.map((item) => (
-                <tr key={item.id}>
-                  <td data-label="Colaborador">{item.colaborador}</td>
-                  <td data-label="Treinamento">{item.treinamento}</td>
-                  <td data-label="Categoria">{item.categoria || '-'}</td>
-                  <td data-label="Data">{item.data ? new Date(`${item.data}T00:00:00`).toLocaleDateString('pt-BR') : '-'}</td>
-                  <td data-label="Instrutor">{item.instrutor || '-'}</td>
-                  <td data-label="Carga">{item.cargaHoraria || '-'}</td>
-                  <td data-label="Status">
-                    <span className={`badge badge-${String(item.status).toLowerCase().replace(/\s+/g, '-')}`}>
-                      {item.status || 'Agendado'}
-                    </span>
-                  </td>
-                  <td data-label="Observacoes">{item.observacoes || '-'}</td>
-                  <td data-label="Acoes">
-                    <button type="button" className="btn excluir" onClick={() => handleDelete(item.id)}>Excluir</button>
-                  </td>
-                </tr>
-              ))}
+              {registrosFiltrados.map((item) => {
+                const statusAtual = resolveTreinamentoStatus(item);
+
+                return (
+                  <tr key={item.id}>
+                    <td data-label="Foto">
+                      {item.fotoUrl ? (
+                        <img
+                          src={item.fotoUrl}
+                          alt={item.colaborador || 'Foto do colaborador'}
+                          style={{ width: 42, height: 42, objectFit: 'cover', borderRadius: '50%', border: '2px solid #dbeafe' }}
+                        />
+                      ) : (
+                        <span style={{ display: 'inline-block', width: 42, height: 42, borderRadius: '50%', background: '#e2e8f0', lineHeight: '42px', textAlign: 'center', fontSize: '12px' }}>-</span>
+                      )}
+                    </td>
+                    <td data-label="Colaborador">{item.colaborador}</td>
+                    <td data-label="Treinamento">{item.treinamento}</td>
+                    <td data-label="Data inicio">{item.dataInicio ? new Date(`${item.dataInicio}T00:00:00`).toLocaleDateString('pt-BR') : '-'}</td>
+                    <td data-label="Data fim">{item.dataFim ? new Date(`${item.dataFim}T00:00:00`).toLocaleDateString('pt-BR') : '-'}</td>
+                    <td data-label="Status">
+                      <span className={getTreinamentoBadgeClass(statusAtual)}>
+                        {statusAtual}
+                      </span>
+                    </td>
+                    <td data-label="Observacoes">{item.observacoes || '-'}</td>
+                    <td data-label="Acoes">
+                      <div className="acoes-inline">
+                        <button type="button" className="btn editar" onClick={() => handleEdit(item)}>Editar</button>
+                        <button type="button" className="btn excluir" onClick={() => handleDelete(item.id)}>Excluir</button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -1521,6 +2360,8 @@ function DashboardPage({ pagePermissions }) {
         {pagePermissions['historico-opcoes'] && <LinkButton to="/historico-opcoes">Historico por Opcao</LinkButton>}
         {pagePermissions['dashboard-turnos'] && <LinkButton to="/dashboard-turnos">Dashboard por Turno</LinkButton>}
         {pagePermissions['agente-ia'] && <LinkButton to="/agente-ia">Agente IA</LinkButton>}
+        {pagePermissions['status-treinamentos'] && <LinkButton to="/status-treinamentos">Status de Treinamentos</LinkButton>}
+        {pagePermissions['colaboradores'] && <LinkButton to="/colaboradores">Cadastro de Colaboradores</LinkButton>}
         {equipamentos.some((e) => e.status === 'parado') && (
           <button type="button" className="btn excluir" onClick={limparStatusParado}>Limpar Status Parado</button>
         )}
@@ -3318,7 +4159,8 @@ export default function App() {
         <Route path="/historico-opcoes" element={renderProtectedPage('historico-opcoes', <HistoricoOpcoesPage />)} />
         <Route path="/dashboard-turnos" element={renderProtectedPage('dashboard-turnos', <DashboardTurnosPage />)} />
         <Route path="/agente-ia" element={renderProtectedPage('agente-ia', <AgenteIAPage />)} />
-        <Route path="/treinamentos" element={renderProtectedPage('treinamentos', <TreinamentosPage />)} />
+        <Route path="/status-treinamentos" element={renderProtectedPage('status-treinamentos', <StatusTreinamentosPage />)} />
+        <Route path="/colaboradores" element={renderProtectedPage('colaboradores', <ColaboradoresPage />)} />
         <Route path="/admin-acessos" element={<AdminAccessPage isAdmin={isAdmin} />} />
         <Route path="/admin-auditoria" element={<AdminAuditoriaPage isAdmin={isAdmin} />} />
       </Routes>

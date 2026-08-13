@@ -4,6 +4,8 @@ create table if not exists public.app_state (
   equipamentos jsonb not null default '[]'::jsonb,
   historico_paradas jsonb not null default '[]'::jsonb,
   relatorio_turnos_notas jsonb not null default '{}'::jsonb,
+  treinamentos jsonb not null default '[]'::jsonb,
+  colaboradores jsonb not null default '[]'::jsonb,
   updated_at timestamptz not null default now()
 );
 
@@ -12,6 +14,12 @@ alter table public.app_state
 
 alter table public.app_state
   add column if not exists relatorio_turnos_notas jsonb not null default '{}'::jsonb;
+
+alter table public.app_state
+  add column if not exists treinamentos jsonb not null default '[]'::jsonb;
+
+alter table public.app_state
+  add column if not exists colaboradores jsonb not null default '[]'::jsonb;
 
 alter table public.app_state
   alter column owner_id drop not null;
@@ -93,13 +101,15 @@ alter table public.user_access
 
 update public.user_access
 set
-  allowed_pages = '["dashboard", "historico", "relatorio-turnos", "historico-opcoes", "dashboard-turnos", "agente-ia"]'::jsonb,
+  allowed_pages = '["dashboard", "historico", "relatorio-turnos", "relatorio-equipe-eletrica", "historico-opcoes", "dashboard-turnos", "agente-ia", "treinamentos"]'::jsonb,
   updated_at = now()
 where status = 'approved'
   and (
     allowed_pages is null
     or jsonb_typeof(allowed_pages) <> 'array'
     or jsonb_array_length(allowed_pages) = 0
+    or not (allowed_pages ? 'treinamentos')
+    or not (allowed_pages ? 'relatorio-equipe-eletrica')
   );
 
 drop policy if exists "Allow anon read app_state" on public.app_state;
