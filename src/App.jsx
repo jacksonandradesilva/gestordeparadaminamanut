@@ -43,7 +43,8 @@ const PAGE_ACCESS_OPTIONS = [
   { key: 'relatorio-equipe-eletrica', label: 'Relatorio equipe eletrica', path: '/relatorio-equipe-eletrica' },
   { key: 'historico-opcoes', label: 'Historico por opcao', path: '/historico-opcoes' },
   { key: 'dashboard-turnos', label: 'Dashboard por turno', path: '/dashboard-turnos' },
-  { key: 'agente-ia', label: 'Agente IA', path: '/agente-ia' }
+  { key: 'agente-ia', label: 'Agente IA', path: '/agente-ia' },
+  { key: 'treinamentos', label: 'Cadastro de treinamentos', path: '/treinamentos' }
 ];
 
 function normalizeAllowedPages(pages) {
@@ -843,6 +844,262 @@ function Header({ title }) {
 
 function PageFooter() {
   return <footer className="page-footer">Criado por: Jackson A. Silva</footer>;
+}
+
+const TREINAMENTOS_STORAGE_KEY = 'mina_treinamentos_v1';
+
+function getEmptyTreinamentos() {
+  return [];
+}
+
+function readTreinamentos() {
+  try {
+    const raw = window.localStorage.getItem(TREINAMENTOS_STORAGE_KEY);
+
+    if (!raw) {
+      return getEmptyTreinamentos();
+    }
+
+    const parsed = JSON.parse(raw);
+
+    if (!Array.isArray(parsed)) {
+      return getEmptyTreinamentos();
+    }
+
+    return parsed
+      .filter((item) => item && typeof item === 'object')
+      .map((item) => ({
+        id: Number(item.id) || Date.now() + Math.random(),
+        colaborador: String(item.colaborador || '').trim(),
+        treinamento: String(item.treinamento || '').trim(),
+        categoria: String(item.categoria || '').trim(),
+        data: String(item.data || '').trim(),
+        instrutor: String(item.instrutor || '').trim(),
+        cargaHoraria: String(item.cargaHoraria || '').trim(),
+        status: ['Agendado', 'Em andamento', 'Concluido', 'Vencido'].includes(String(item.status || ''))
+          ? String(item.status)
+          : 'Agendado',
+        observacoes: String(item.observacoes || '').trim()
+      }))
+      .filter((item) => item.colaborador || item.treinamento);
+  } catch (error) {
+    console.error('Falha ao ler treinamentos:', error);
+    return getEmptyTreinamentos();
+  }
+}
+
+function writeTreinamentos(list) {
+  const safeList = Array.isArray(list) ? list : [];
+  const normalized = safeList.map((item, index) => ({
+    id: Number(item.id) || Date.now() + index,
+    colaborador: String(item.colaborador || '').trim(),
+    treinamento: String(item.treinamento || '').trim(),
+    categoria: String(item.categoria || '').trim(),
+    data: String(item.data || '').trim(),
+    instrutor: String(item.instrutor || '').trim(),
+    cargaHoraria: String(item.cargaHoraria || '').trim(),
+    status: ['Agendado', 'Em andamento', 'Concluido', 'Vencido'].includes(String(item.status || ''))
+      ? String(item.status)
+      : 'Agendado',
+    observacoes: String(item.observacoes || '').trim()
+  })).filter((item) => item.colaborador || item.treinamento);
+
+  window.localStorage.setItem(TREINAMENTOS_STORAGE_KEY, JSON.stringify(normalized));
+  return normalized;
+}
+
+function TreinamentosPage() {
+  const [registros, setRegistros] = useState([]);
+  const [formData, setFormData] = useState({
+    colaborador: '',
+    treinamento: '',
+    categoria: '',
+    data: '',
+    instrutor: '',
+    cargaHoraria: '',
+    status: 'Agendado',
+    observacoes: ''
+  });
+
+  useEffect(() => {
+    setRegistros(readTreinamentos());
+  }, []);
+
+  function updateField(field, value) {
+    setFormData((current) => ({
+      ...current,
+      [field]: value
+    }));
+  }
+
+  function handleSubmit(event) {
+    event.preventDefault();
+
+    const nextItem = {
+      id: Date.now(),
+      colaborador: formData.colaborador.trim(),
+      treinamento: formData.treinamento.trim(),
+      categoria: formData.categoria.trim(),
+      data: formData.data,
+      instrutor: formData.instrutor.trim(),
+      cargaHoraria: formData.cargaHoraria.trim(),
+      status: formData.status,
+      observacoes: formData.observacoes.trim()
+    };
+
+    if (!nextItem.colaborador || !nextItem.treinamento) {
+      window.alert('Preencha pelo menos o colaborador e o treinamento.');
+      return;
+    }
+
+    const updated = writeTreinamentos([nextItem, ...registros]);
+    setRegistros(updated);
+    setFormData({
+      colaborador: '',
+      treinamento: '',
+      categoria: '',
+      data: '',
+      instrutor: '',
+      cargaHoraria: '',
+      status: 'Agendado',
+      observacoes: ''
+    });
+  }
+
+  function handleDelete(id) {
+    const updated = writeTreinamentos(registros.filter((item) => item.id !== id));
+    setRegistros(updated);
+  }
+
+  const concluidos = registros.filter((item) => item.status === 'Concluido').length;
+  const agendados = registros.filter((item) => item.status === 'Agendado').length;
+
+  return (
+    <main className="page-shell">
+      <Header title="Cadastro de Treinamentos" />
+
+      <div className="page-actions">
+        <LinkButton to="/">Voltar ao painel</LinkButton>
+      </div>
+
+      <section className="summary-cards">
+        <article className="card">
+          <span>Total</span>
+          <strong>{registros.length}</strong>
+        </article>
+        <article className="card">
+          <span>Agendados</span>
+          <strong>{agendados}</strong>
+        </article>
+        <article className="card">
+          <span>Concluidos</span>
+          <strong>{concluidos}</strong>
+        </article>
+      </section>
+
+      <section className="card">
+        <h2>Novo treinamento</h2>
+        <form className="ai-agent-form" onSubmit={handleSubmit}>
+          <div className="summary-cards">
+            <div className="form-field">
+              <label>Colaborador</label>
+              <input value={formData.colaborador} onChange={(event) => updateField('colaborador', event.target.value)} placeholder="Nome do colaborador" />
+            </div>
+            <div className="form-field">
+              <label>Treinamento</label>
+              <input value={formData.treinamento} onChange={(event) => updateField('treinamento', event.target.value)} placeholder="Ex: NR-10, EPI, SSMA" />
+            </div>
+          </div>
+
+          <div className="summary-cards">
+            <div className="form-field">
+              <label>Categoria</label>
+              <input value={formData.categoria} onChange={(event) => updateField('categoria', event.target.value)} placeholder="Seguranca, qualidade, operacional..." />
+            </div>
+            <div className="form-field">
+              <label>Data</label>
+              <input type="date" value={formData.data} onChange={(event) => updateField('data', event.target.value)} />
+            </div>
+            <div className="form-field">
+              <label>Instrutor</label>
+              <input value={formData.instrutor} onChange={(event) => updateField('instrutor', event.target.value)} placeholder="Nome do instrutor" />
+            </div>
+            <div className="form-field">
+              <label>Carga horaria</label>
+              <input value={formData.cargaHoraria} onChange={(event) => updateField('cargaHoraria', event.target.value)} placeholder="Ex: 8h" />
+            </div>
+          </div>
+
+          <div className="summary-cards">
+            <div className="form-field">
+              <label>Status</label>
+              <select value={formData.status} onChange={(event) => updateField('status', event.target.value)}>
+                <option>Agendado</option>
+                <option>Em andamento</option>
+                <option>Concluido</option>
+                <option>Vencido</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="form-field">
+            <label>Observacoes</label>
+            <textarea rows="3" value={formData.observacoes} onChange={(event) => updateField('observacoes', event.target.value)} placeholder="Observacoes adicionais, requisitos ou lembretes." />
+          </div>
+
+          <div className="form-actions">
+            <button type="submit">Salvar treinamento</button>
+          </div>
+        </form>
+      </section>
+
+      <section className="card">
+        <h2>Registros cadastrados</h2>
+        {registros.length === 0 ? (
+          <div className="empty-state">Nenhum treinamento cadastrado ainda.</div>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Colaborador</th>
+                <th>Treinamento</th>
+                <th>Categoria</th>
+                <th>Data</th>
+                <th>Instrutor</th>
+                <th>Carga</th>
+                <th>Status</th>
+                <th>Observacoes</th>
+                <th>Acoes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {registros.map((item) => (
+                <tr key={item.id}>
+                  <td data-label="Colaborador">{item.colaborador}</td>
+                  <td data-label="Treinamento">{item.treinamento}</td>
+                  <td data-label="Categoria">{item.categoria || '-'}</td>
+                  <td data-label="Data">{item.data ? new Date(`${item.data}T00:00:00`).toLocaleDateString('pt-BR') : '-'}</td>
+                  <td data-label="Instrutor">{item.instrutor || '-'}</td>
+                  <td data-label="Carga">{item.cargaHoraria || '-'}</td>
+                  <td data-label="Status">
+                    <span className={`badge badge-${String(item.status).toLowerCase().replace(/\s+/g, '-')}`}>
+                      {item.status || 'Agendado'}
+                    </span>
+                  </td>
+                  <td data-label="Observacoes">{item.observacoes || '-'}</td>
+                  <td data-label="Acoes">
+                    <button type="button" className="btn excluir" onClick={() => handleDelete(item.id)}>Excluir</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <PageFooter />
+    </main>
+  );
 }
 
 function getEmptyCadastrosBase() {
@@ -3061,6 +3318,7 @@ export default function App() {
         <Route path="/historico-opcoes" element={renderProtectedPage('historico-opcoes', <HistoricoOpcoesPage />)} />
         <Route path="/dashboard-turnos" element={renderProtectedPage('dashboard-turnos', <DashboardTurnosPage />)} />
         <Route path="/agente-ia" element={renderProtectedPage('agente-ia', <AgenteIAPage />)} />
+        <Route path="/treinamentos" element={renderProtectedPage('treinamentos', <TreinamentosPage />)} />
         <Route path="/admin-acessos" element={<AdminAccessPage isAdmin={isAdmin} />} />
         <Route path="/admin-auditoria" element={<AdminAuditoriaPage isAdmin={isAdmin} />} />
       </Routes>

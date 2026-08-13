@@ -14,7 +14,8 @@ export const PAGE_ACCESS_KEYS = [
   'relatorio-equipe-eletrica',
   'historico-opcoes',
   'dashboard-turnos',
-  'agente-ia'
+  'agente-ia',
+  'treinamentos'
 ];
 
 const RELATORIO_EQUIPE_ELETRICA_KEY = '__relatorio_equipe_eletrica__';
