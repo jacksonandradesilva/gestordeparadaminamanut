@@ -968,7 +968,7 @@ function getStatusMeta(status) {
 
   if (status === 'Agendamento') {
     return {
-      label: 'Em agendamento',
+      label: 'Aguardando agendamento',
       tone: 'warning',
       icon: '●',
       accent: '#d97706',
@@ -1042,6 +1042,7 @@ function writeTreinamentos(list) {
 
 function StatusTreinamentosPage() {
   const [registros, setRegistros] = useState([]);
+  const [filtroStatus, setFiltroStatus] = useState('Todos');
 
   useEffect(() => {
     let active = true;
@@ -1105,6 +1106,30 @@ function StatusTreinamentosPage() {
   const agrupadosLiberados = buildAgrupados(liberados, 'Liberado');
   const agrupadosAgendados = buildAgrupados(agendados, 'Agendamento');
   const agrupadosVencidos = buildAgrupados(vencidos, 'Vencido');
+
+  const opcoesFiltroStatus = [
+    { value: 'Todos', label: 'Todos' },
+    { value: 'Liberado', label: 'Liberado' },
+    { value: 'Agendamento', label: 'Aguardando agendamento' },
+    { value: 'Vencido', label: 'Vencido' }
+  ];
+
+  const gruposVisiveis = {
+    Todos: [
+      { key: 'Liberado', value: 'Liberado', tone: 'success', title: 'Treinamentos liberados', empty: 'Nenhum treinamento liberado no momento.', items: agrupadosLiberados },
+      { key: 'Agendamento', value: 'Agendamento', tone: 'warning', title: 'Treinamentos aguardando agendamento', empty: 'Nenhum treinamento aguardando agendamento no momento.', items: agrupadosAgendados },
+      { key: 'Vencido', value: 'Vencido', tone: 'danger', title: 'Treinamentos vencidos', empty: 'Nenhum treinamento vencido no momento.', items: agrupadosVencidos }
+    ],
+    Liberado: [
+      { key: 'Liberado', value: 'Liberado', tone: 'success', title: 'Treinamentos liberados', empty: 'Nenhum treinamento liberado no momento.', items: agrupadosLiberados }
+    ],
+    Agendamento: [
+      { key: 'Agendamento', value: 'Agendamento', tone: 'warning', title: 'Treinamentos aguardando agendamento', empty: 'Nenhum treinamento aguardando agendamento no momento.', items: agrupadosAgendados }
+    ],
+    Vencido: [
+      { key: 'Vencido', value: 'Vencido', tone: 'danger', title: 'Treinamentos vencidos', empty: 'Nenhum treinamento vencido no momento.', items: agrupadosVencidos }
+    ]
+  };
 
   async function handleClearAll() {
     const confirmed = window.confirm('Deseja limpar todos os dados de treinamentos e colaboradores?');
@@ -1215,56 +1240,37 @@ function StatusTreinamentosPage() {
         </div>
       </section>
 
-      <section className="status-section status-section--success">
-        <div className="status-section-header">
-          <div>
-            <p className="eyebrow">Status</p>
-            <h2>Treinamentos liberados</h2>
-          </div>
-        </div>
+      <div className="status-filter-bar" aria-label="Filtros de status de treinamento">
+        {opcoesFiltroStatus.map((opcao) => (
+          <button
+            key={opcao.value}
+            type="button"
+            className={`status-filter-btn ${filtroStatus === opcao.value ? 'active' : ''}`}
+            onClick={() => setFiltroStatus(opcao.value)}
+          >
+            {opcao.label}
+          </button>
+        ))}
+      </div>
 
-        {agrupadosLiberados.length === 0 ? (
-          <div className="empty-state">Nenhum treinamento liberado no momento.</div>
-        ) : (
-          <div className="status-grid">
-            {agrupadosLiberados.map((colaborador) => renderColaboradorCard(colaborador, 'Liberado'))}
+      {gruposVisiveis[filtroStatus].map((grupo) => (
+        <section key={grupo.key} className={`status-section status-section--${grupo.tone}`}>
+          <div className="status-section-header">
+            <div>
+              <p className="eyebrow">Status</p>
+              <h2>{grupo.title}</h2>
+            </div>
           </div>
-        )}
-      </section>
 
-      <section className="status-section status-section--warning">
-        <div className="status-section-header">
-          <div>
-            <p className="eyebrow">Status</p>
-            <h2>Treinamentos em agendamento</h2>
-          </div>
-        </div>
-
-        {agrupadosAgendados.length === 0 ? (
-          <div className="empty-state">Nenhum treinamento em agendamento no momento.</div>
-        ) : (
-          <div className="status-grid">
-            {agrupadosAgendados.map((colaborador) => renderColaboradorCard(colaborador, 'Agendamento'))}
-          </div>
-        )}
-      </section>
-
-      <section className="status-section status-section--danger">
-        <div className="status-section-header">
-          <div>
-            <p className="eyebrow">Status</p>
-            <h2>Treinamentos vencidos</h2>
-          </div>
-        </div>
-
-        {agrupadosVencidos.length === 0 ? (
-          <div className="empty-state">Nenhum treinamento vencido no momento.</div>
-        ) : (
-          <div className="status-grid">
-            {agrupadosVencidos.map((colaborador) => renderColaboradorCard(colaborador, 'Vencido'))}
-          </div>
-        )}
-      </section>
+          {grupo.items.length === 0 ? (
+            <div className="empty-state">{grupo.empty}</div>
+          ) : (
+            <div className="status-grid">
+              {grupo.items.map((colaborador) => renderColaboradorCard(colaborador, grupo.value))}
+            </div>
+          )}
+        </section>
+      ))}
 
       <PageFooter />
     </main>
@@ -1336,26 +1342,6 @@ function ColaboradoresPage() {
       ...current,
       treinamentos: current.treinamentos.filter((_, treinoIndex) => treinoIndex !== index)
     }));
-  }
-
-  async function handlePhotoUpload(event) {
-    const file = event.target.files?.[0];
-
-    if (!file) {
-      return;
-    }
-
-    try {
-      const uploadedUrl = await uploadCollaboratorPhoto(file, formData.nome || formData.matricula || 'colaborador');
-      setFormData((current) => ({
-        ...current,
-        fotoUrl: uploadedUrl
-      }));
-    } catch (error) {
-      window.alert(error?.message || 'Nao foi possivel enviar a foto do colaborador.');
-    } finally {
-      event.target.value = '';
-    }
   }
 
   function resetForm() {
@@ -1457,6 +1443,20 @@ function ColaboradoresPage() {
     await saveState({ colaboradores: next, treinamentos: statusSync });
   }
 
+  function formatDateToBrazil(value) {
+    if (!value) {
+      return '-';
+    }
+
+    const date = new Date(`${value}T00:00:00`);
+
+    if (Number.isNaN(date.getTime())) {
+      return String(value);
+    }
+
+    return date.toLocaleDateString('pt-BR');
+  }
+
   function formatTreinamentoLabel(item) {
     if (!item || typeof item !== 'object') {
       return String(item || '');
@@ -1516,18 +1516,6 @@ function ColaboradoresPage() {
             <div className="form-field">
               <label>Setor</label>
               <input value={formData.setor} onChange={(event) => updateField('setor', event.target.value)} placeholder="Ex: Manutencao" />
-            </div>
-          </div>
-
-          <div className="photo-upload-section">
-            <label>Foto 3x4</label>
-            <div className="photo-upload-box">
-              <input type="file" accept="image/*" onChange={handlePhotoUpload} />
-              {formData.fotoUrl ? (
-                <img src={formData.fotoUrl} alt="Preview do colaborador" className="photo-preview" />
-              ) : (
-                <div className="photo-placeholder">Sem foto</div>
-              )}
             </div>
           </div>
 
@@ -1595,7 +1583,7 @@ function ColaboradoresPage() {
         {colaboradores.length === 0 ? (
           <div className="empty-state">Nenhum colaborador cadastrado.</div>
         ) : (
-          <table>
+          <table className="professional-table">
             <thead>
               <tr>
                 <th>Matricula</th>
@@ -1609,26 +1597,34 @@ function ColaboradoresPage() {
             <tbody>
               {colaboradores.map((item) => (
                 <tr key={item.id}>
-                  <td>{item.matricula}</td>
-                  <td>{item.nome}</td>
-                  <td>{item.setor || '-'}</td>
+                  <td>
+                    <span className="matricula-badge">{item.matricula}</span>
+                  </td>
+                  <td>
+                    <strong className="colaborador-nome">{item.nome}</strong>
+                  </td>
+                  <td>
+                    <span className="setor-badge">{item.setor || 'Não informado'}</span>
+                  </td>
                   <td>
                     {Array.isArray(item.treinamentos) && item.treinamentos.length > 0 ? (
-                      <ul style={{ margin: 0, paddingLeft: 18 }}>
+                      <ul className="professional-training-list">
                         {item.treinamentos.map((treinamento, index) => (
                           <li key={`${item.id}-${index}`}>
-                            {formatTreinamentoLabel(treinamento)}
+                            <span className="training-name">{formatTreinamentoLabel(treinamento)}</span>
                             {getTreinamentoStatusBadge(treinamento)}
                           </li>
                         ))}
                       </ul>
                     ) : (
-                      '-'
+                      <span className="empty-mini">Sem treinamentos</span>
                     )}
                   </td>
-                  <td>{item.cadastro || '-'}</td>
                   <td>
-                    <button type="button" className="btn secundario" onClick={() => startEdit(item)} style={{ marginRight: 8 }}>Editar</button>
+                    <span className="date-badge">{formatDateToBrazil(item.cadastro)}</span>
+                  </td>
+                  <td className="acoes-coluna profissional-acoes">
+                    <button type="button" className="btn secundario" onClick={() => startEdit(item)}>Editar</button>
                     <button type="button" className="btn excluir" onClick={() => handleDelete(item.id)}>Excluir</button>
                   </td>
                 </tr>
