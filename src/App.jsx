@@ -1154,9 +1154,12 @@ function StatusTreinamentosPage() {
               src={colaborador.fotoUrl}
               alt={colaborador.colaborador}
               className="status-person-avatar"
+              style={{ objectFit: 'cover', width: 56, height: 72, borderRadius: 10 }}
             />
           ) : (
-            <span className="status-person-avatar status-person-avatar--placeholder">{colaborador.colaborador?.charAt(0)?.toUpperCase() || '-'}</span>
+            <span className="status-person-avatar status-person-avatar--placeholder" style={{ width: 56, height: 72, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {colaborador.colaborador?.charAt(0)?.toUpperCase() || '-'}
+            </span>
           )}
 
           <div className="status-person-title-wrap">
@@ -1517,6 +1520,25 @@ function ColaboradoresPage() {
               <label>Setor</label>
               <input value={formData.setor} onChange={(event) => updateField('setor', event.target.value)} placeholder="Ex: Manutencao" />
             </div>
+          </div>
+
+          <div className="form-field">
+            <label>URL da foto do perfil (Supabase)</label>
+            <input
+              type="url"
+              value={formData.fotoUrl}
+              onChange={(event) => updateField('fotoUrl', event.target.value)}
+              placeholder="https://xxxxx.supabase.co/storage/v1/object/public/colaborador-fotos/..."
+            />
+            {formData.fotoUrl && (
+              <div style={{ marginTop: 12 }}>
+                <img
+                  src={formData.fotoUrl}
+                  alt="Pré-visualização da foto do colaborador"
+                  style={{ width: 110, height: 140, objectFit: 'cover', borderRadius: 10, border: '1px solid #dbeafe' }}
+                />
+              </div>
+            )}
           </div>
 
           <div className="form-field">
