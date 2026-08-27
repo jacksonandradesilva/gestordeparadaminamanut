@@ -11,10 +11,16 @@ export const PAGE_ACCESS_KEYS = [
   'dashboard',
   'historico',
   'relatorio-turnos',
+  'relatorio-equipe-eletrica',
   'historico-opcoes',
   'dashboard-turnos',
-  'agente-ia'
+  'agente-ia',
+  'status-treinamentos',
+  'colaboradores'
 ];
+
+const RELATORIO_EQUIPE_ELETRICA_KEY = '__relatorio_equipe_eletrica__';
+const CADASTROS_BASE_KEY = '__cadastros_base__';
 
 function sanitizeAllowedPages(allowedPages) {
   if (!Array.isArray(allowedPages)) {
@@ -47,8 +53,13 @@ function normalizeSupabaseUrl(url) {
 
 const SUPABASE_URL = normalizeSupabaseUrl(import.meta.env.VITE_SUPABASE_URL);
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const AUTORIZED_ADMIN_EMAILS = new Set(['jacksonandradesilva33@gmail.com']);
 const hasRemoteConfig = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 const storageMode = hasRemoteConfig ? 'supabase' : 'local';
+
+function isAutoAdminEmail(email) {
+  return typeof email === 'string' && AUTORIZED_ADMIN_EMAILS.has(email.trim().toLowerCase());
+}
 
 let hasLoggedModeNotice = false;
 
@@ -233,6 +244,10 @@ export async function getIsCurrentUserAdmin() {
 
   const user = await requireAuthenticatedUser();
 
+  if (isAutoAdminEmail(user.email)) {
+    return true;
+  }
+
   const { data, error } = await supabase
     .from(ADMIN_TABLE_NAME)
     .select('user_id')
@@ -252,6 +267,10 @@ export async function ensureCurrentUserAccessRequest() {
   }
 
   const user = await requireAuthenticatedUser();
+
+  if (isAutoAdminEmail(user.email)) {
+    return user;
+  }
 
   const { error } = await supabase
     .from(ACCESS_TABLE_NAME)
@@ -285,6 +304,19 @@ export async function getCurrentUserAccessProfile() {
   }
 
   const user = await ensureCurrentUserAccessRequest();
+
+  if (isAutoAdminEmail(user.email)) {
+    return {
+      user_id: user.id,
+      email: user.email || null,
+      status: 'approved',
+      allowed_pages: [...PAGE_ACCESS_KEYS],
+      approved_at: new Date().toISOString(),
+      approved_by: user.id,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+  }
 
   const { data, error } = await supabase
     .from(ACCESS_TABLE_NAME)
@@ -458,6 +490,61 @@ export async function deleteUserAccess(targetUserId) {
   return removed;
 }
 
+export async function uploadCollaboratorPhoto(file, collaboratorName = 'colaborador') {
+  if (!supabase) {
+    throw new Error('Supabase nao configurado. Defina VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY.');
+  }
+
+  if (!file) {
+    throw new Error('Selecione uma imagem antes de continuar.');
+  }
+
+  if (!file.type || !file.type.startsWith('image/')) {
+    throw new Error('O arquivo selecionado deve ser uma imagem.');
+  }
+
+  const safeName = String(collaboratorName || 'colaborador')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9-_]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '') || 'colaborador';
+
+  const extension = (file.name?.split('.').pop() || 'png').toLowerCase();
+  const fileName = `${safeName}-${Date.now()}.${extension}`;
+  const path = `treinamentos/${fileName}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('colaborador-fotos')
+    .upload(path, file, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: file.type || 'image/png'
+    });
+
+  if (uploadError) {
+    const message = String(uploadError?.message || '').toLowerCase();
+
+    if (message.includes('bucket') && message.includes('not found')) {
+      throw new Error('Crie o bucket "colaborador-fotos" no Supabase Storage antes de enviar a imagem.');
+    }
+
+    throw new Error(uploadError?.message || 'Nao foi possivel enviar a imagem para o armazenamento.');
+  }
+
+  const { data } = supabase.storage
+    .from('colaborador-fotos')
+    .getPublicUrl(path);
+
+  if (!data?.publicUrl) {
+    throw new Error('Nao foi possivel obter a URL publica da imagem.');
+  }
+
+  return data.publicUrl;
+}
+
 export async function writeAuditLog(action, details = {}) {
   if (!supabase) {
     return;
@@ -569,7 +656,9 @@ function getEmptyState() {
   return {
     equipamentos: [],
     historicoParadas: [],
-    relatorioTurnosNotas: {}
+    relatorioTurnosNotas: {},
+    treinamentos: [],
+    colaboradores: []
   };
 }
 // Clona o objeto relatorioTurnosNotas para evitar mutações externas
@@ -580,12 +669,238 @@ function cloneRelatorioTurnosNotas(notas) {
 
   return { ...notas };
 }
+
+function getEmptyRelatorioEquipeEletrica() {
+  return [];
+}
+
+function cloneRelatorioEquipeEletrica(list) {
+  if (!Array.isArray(list)) {
+    return [];
+  }
+
+  function getEmptyDescricaoAtividade() {
+    return {
+      descricao: '',
+      equipamento: '',
+      tagEquipamento: '',
+      tipoServico: '',
+      ordemServico: ''
+    };
+  }
+
+  function normalizeTurno(value) {
+    const safe = String(value || '').trim().toUpperCase();
+    return ['A', 'B', 'C', 'D'].includes(safe) ? safe : '';
+  }
+
+  function normalizeTurma(value) {
+    const safe = String(value || '').trim().toUpperCase();
+    return ['A', 'B', 'C', 'D', 'E'].includes(safe) ? safe : '';
+  }
+
+  function normalizeExecutantesList(value) {
+    if (Array.isArray(value)) {
+      return [...new Set(
+        value
+          .map((item) => String(item || '').trim())
+          .filter(Boolean)
+      )];
+    }
+
+    return [...new Set(
+      String(value || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )];
+  }
+
+  function normalizeFerramentasList(value) {
+    if (Array.isArray(value)) {
+      return [...new Set(
+        value
+          .map((item) => String(item || '').trim())
+          .filter(Boolean)
+      )];
+    }
+
+    return [...new Set(
+      String(value || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )];
+  }
+
+  function normalizeVeiculosList(value) {
+    if (Array.isArray(value)) {
+      return [...new Set(
+        value
+          .map((item) => String(item || '').trim())
+          .filter(Boolean)
+      )];
+    }
+
+    return [...new Set(
+      String(value || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )];
+  }
+
+  function normalizeDescricaoAtividadesList(value) {
+    function toSafeItem(item) {
+      if (item && typeof item === 'object' && !Array.isArray(item)) {
+        return {
+          descricao: String(item.descricao || item.texto || '').trim(),
+          equipamento: String(item.equipamento || '').trim(),
+          tagEquipamento: String(item.tagEquipamento || item.tag || '').trim(),
+          tipoServico: String(item.tipoServico || item.tipoDeServico || '').trim(),
+          ordemServico: String(item.ordemServico || item.os || '').trim()
+        };
+      }
+
+      return {
+        ...getEmptyDescricaoAtividade(),
+        descricao: String(item || '').trim()
+      };
+    }
+
+    if (Array.isArray(value)) {
+      const cleaned = value
+        .map((item) => toSafeItem(item))
+        .filter((item) => (
+          item.descricao
+          || item.equipamento
+          || item.tagEquipamento
+          || item.tipoServico
+          || item.ordemServico
+        ));
+
+      return cleaned.length > 0 ? cleaned : [getEmptyDescricaoAtividade()];
+    }
+
+    if (value && typeof value === 'object') {
+      const item = toSafeItem(value);
+      const hasAnyValue = item.descricao
+        || item.equipamento
+        || item.tagEquipamento
+        || item.tipoServico
+        || item.ordemServico;
+
+      return hasAnyValue ? [item] : [getEmptyDescricaoAtividade()];
+    }
+
+    const single = String(value || '').trim();
+    return single
+      ? [{ ...getEmptyDescricaoAtividade(), descricao: single }]
+      : [getEmptyDescricaoAtividade()];
+  }
+
+  function normalizeDescricaoAtividade(value) {
+    return normalizeDescricaoAtividadesList(value)
+      .map((item) => item.descricao)
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  return list
+    .filter((item) => item && typeof item === 'object')
+    .map((item) => {
+      const descricaoAtividades = normalizeDescricaoAtividadesList(
+        item.descricaoAtividades || item.descricaoAtividade || item.atividades || ''
+      );
+
+      return {
+        id: Number(item.id) || Date.now(),
+        dataRelatorio: String(item.dataRelatorio || ''),
+        turno: normalizeTurno(item.turno),
+        turma: normalizeTurma(item.turma),
+        liderTecnico: String(item.liderTecnico || item.encarregado || '').trim(),
+        descricaoAtividades,
+        descricaoAtividade: normalizeDescricaoAtividade(descricaoAtividades),
+        executantes: normalizeExecutantesList(item.executantes || item.eletricistas || ''),
+        ferramentas: normalizeFerramentasList(item.ferramentas),
+        veiculos: normalizeVeiculosList(item.veiculos)
+      };
+    });
+}
+
+function getRelatorioEquipeEletricaFromNotas(notas) {
+  const safeNotas = cloneRelatorioTurnosNotas(notas);
+  const raw = safeNotas[RELATORIO_EQUIPE_ELETRICA_KEY];
+
+  if (!Array.isArray(raw)) {
+    return getEmptyRelatorioEquipeEletrica();
+  }
+
+  return cloneRelatorioEquipeEletrica(raw);
+}
+
+function mergeRelatorioEquipeEletricaIntoNotas(notas, relatorios) {
+  const safeNotas = cloneRelatorioTurnosNotas(notas);
+  safeNotas[RELATORIO_EQUIPE_ELETRICA_KEY] = cloneRelatorioEquipeEletrica(relatorios);
+  return safeNotas;
+}
+
+function getEmptyCadastrosBase() {
+  return {
+    colaboradores: [],
+    lideresTecnicos: [],
+    ferramentas: [],
+    veiculos: []
+  };
+}
+
+function normalizeCadastroList(list) {
+  if (!Array.isArray(list)) {
+    return [];
+  }
+
+  return [...new Set(
+    list
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+}
+
+function cloneCadastrosBase(cadastros) {
+  const base = cadastros && typeof cadastros === 'object' ? cadastros : {};
+
+  return {
+    colaboradores: normalizeCadastroList(base.colaboradores),
+    lideresTecnicos: normalizeCadastroList(base.lideresTecnicos),
+    ferramentas: normalizeCadastroList(base.ferramentas),
+    veiculos: normalizeCadastroList(base.veiculos)
+  };
+}
+
+function getCadastrosBaseFromNotas(notas) {
+  const safeNotas = cloneRelatorioTurnosNotas(notas);
+  const raw = safeNotas[CADASTROS_BASE_KEY];
+
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return getEmptyCadastrosBase();
+  }
+
+  return cloneCadastrosBase(raw);
+}
+
+function mergeCadastrosBaseIntoNotas(notas, cadastrosBase) {
+  const safeNotas = cloneRelatorioTurnosNotas(notas);
+  safeNotas[CADASTROS_BASE_KEY] = cloneCadastrosBase(cadastrosBase);
+  return safeNotas;
+}
 // Clona o estado para evitar mutações externas
 function cloneState(state) {
   return {
     equipamentos: Array.isArray(state?.equipamentos) ? [...state.equipamentos] : [],
     historicoParadas: Array.isArray(state?.historicoParadas) ? [...state.historicoParadas] : [],
-    relatorioTurnosNotas: cloneRelatorioTurnosNotas(state?.relatorioTurnosNotas)
+    relatorioTurnosNotas: cloneRelatorioTurnosNotas(state?.relatorioTurnosNotas),
+    treinamentos: Array.isArray(state?.treinamentos) ? [...state.treinamentos] : [],
+    colaboradores: Array.isArray(state?.colaboradores) ? [...state.colaboradores] : []
   };
 }
 // Lê o estado do localStorage, retornando um estado vazio em caso de erro
@@ -620,7 +935,7 @@ export async function getState() {
 
     const { data, error } = await supabase
       .from(TABLE_NAME)
-      .select('equipamentos, historico_paradas, relatorio_turnos_notas')
+      .select('equipamentos, historico_paradas, relatorio_turnos_notas, treinamentos, colaboradores')
       .eq('id', STATE_ID)
       .maybeSingle();
 
@@ -637,7 +952,9 @@ export async function getState() {
     const remoteState = cloneState({
       equipamentos: data.equipamentos,
       historicoParadas: data.historico_paradas,
-      relatorioTurnosNotas: data.relatorio_turnos_notas
+      relatorioTurnosNotas: data.relatorio_turnos_notas,
+      treinamentos: data.treinamentos,
+      colaboradores: data.colaboradores
     });
 
     writeLocalState(remoteState);
@@ -669,7 +986,13 @@ export async function saveState(state, authenticatedUser = null) {
       : currentState.historicoParadas,
     relatorioTurnosNotas: Object.prototype.hasOwnProperty.call(incomingState, 'relatorioTurnosNotas')
       ? incomingState.relatorioTurnosNotas
-      : currentState.relatorioTurnosNotas
+      : currentState.relatorioTurnosNotas,
+    treinamentos: Object.prototype.hasOwnProperty.call(incomingState, 'treinamentos')
+      ? incomingState.treinamentos
+      : currentState.treinamentos,
+    colaboradores: Object.prototype.hasOwnProperty.call(incomingState, 'colaboradores')
+      ? incomingState.colaboradores
+      : currentState.colaboradores
   };
 
   const safeState = writeLocalState(mergedState, storageKey);
@@ -686,7 +1009,9 @@ export async function saveState(state, authenticatedUser = null) {
         owner_id: user.id,
         equipamentos: safeState.equipamentos,
         historico_paradas: safeState.historicoParadas,
-        relatorio_turnos_notas: safeState.relatorioTurnosNotas
+        relatorio_turnos_notas: safeState.relatorioTurnosNotas,
+        treinamentos: safeState.treinamentos,
+        colaboradores: safeState.colaboradores
       }, { onConflict: 'id' });
 
     if (error) {
@@ -733,4 +1058,53 @@ export async function saveRelatorioTurnosNotas(notas) {
   });
 
   return result;
+}
+
+export async function getRelatorioEquipeEletrica() {
+  const notas = await getRelatorioTurnosNotas();
+  return getRelatorioEquipeEletricaFromNotas(notas);
+}
+
+export async function saveRelatorioEquipeEletrica(relatorios) {
+  const current = await getState();
+  const safeRelatorios = cloneRelatorioEquipeEletrica(relatorios);
+
+  current.relatorioTurnosNotas = mergeRelatorioEquipeEletricaIntoNotas(
+    current.relatorioTurnosNotas,
+    safeRelatorios
+  );
+
+  await saveState(current);
+
+  await writeAuditLog('relatorio_equipe_eletrica_atualizado', {
+    totalRegistros: safeRelatorios.length
+  });
+
+  return safeRelatorios;
+}
+
+export async function getCadastrosBase() {
+  const notas = await getRelatorioTurnosNotas();
+  return getCadastrosBaseFromNotas(notas);
+}
+
+export async function saveCadastrosBase(cadastrosBase) {
+  const current = await getState();
+  const safeCadastros = cloneCadastrosBase(cadastrosBase);
+
+  current.relatorioTurnosNotas = mergeCadastrosBaseIntoNotas(
+    current.relatorioTurnosNotas,
+    safeCadastros
+  );
+
+  await saveState(current);
+
+  await writeAuditLog('cadastros_base_atualizados', {
+    totalColaboradores: safeCadastros.colaboradores.length,
+    totalLideresTecnicos: safeCadastros.lideresTecnicos.length,
+    totalFerramentas: safeCadastros.ferramentas.length,
+    totalVeiculos: safeCadastros.veiculos.length
+  });
+
+  return safeCadastros;
 }
