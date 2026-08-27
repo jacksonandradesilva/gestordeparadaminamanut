@@ -1040,7 +1040,7 @@ function writeTreinamentos(list) {
   return normalized;
 }
 
-function StatusTreinamentosPage() {
+function StatusTreinamentosPage({ isAdmin = false }) {
   const [registros, setRegistros] = useState([]);
   const [filtroStatus, setFiltroStatus] = useState('Todos');
 
@@ -1204,7 +1204,9 @@ function StatusTreinamentosPage() {
 
       <div className="page-actions">
         <LinkButton to="/">Voltar ao painel</LinkButton>
-        <button type="button" className="btn excluir" onClick={handleClearAll}>Limpar todos os dados</button>
+        {isAdmin && (
+          <button type="button" className="btn excluir" onClick={handleClearAll}>Limpar todos os dados</button>
+        )}
       </div>
 
       <section className="status-overview-panel">
@@ -4177,7 +4179,7 @@ export default function App() {
         <Route path="/historico-opcoes" element={renderProtectedPage('historico-opcoes', <HistoricoOpcoesPage />)} />
         <Route path="/dashboard-turnos" element={renderProtectedPage('dashboard-turnos', <DashboardTurnosPage />)} />
         <Route path="/agente-ia" element={renderProtectedPage('agente-ia', <AgenteIAPage />)} />
-        <Route path="/status-treinamentos" element={renderProtectedPage('status-treinamentos', <StatusTreinamentosPage />)} />
+        <Route path="/status-treinamentos" element={renderProtectedPage('status-treinamentos', <StatusTreinamentosPage isAdmin={isAdmin} />)} />
         <Route path="/colaboradores" element={renderProtectedPage('colaboradores', <ColaboradoresPage />)} />
         <Route path="/admin-acessos" element={<AdminAccessPage isAdmin={isAdmin} />} />
         <Route path="/admin-auditoria" element={<AdminAuditoriaPage isAdmin={isAdmin} />} />
